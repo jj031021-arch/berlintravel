@@ -52,7 +52,7 @@ def get_weather():
 @st.cache_data
 def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
     """
-    OpenStreetMap을 이용해 장소를 가져오고, 구글 검색 링크를 위한 정보를 준비합니다.
+    OpenStreetMap 데이터 가져오기 + 구글 검색 링크 생성
     """
     overpass_url = "http://overpass-api.de/api/interpreter"
     
@@ -83,21 +83,19 @@ def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
                 cuisine = element['tags'].get('cuisine', 'general').lower()
                 name = element['tags']['name']
                 
-                # 음식점 분류
-                place_type = "기타"
+                # 음식점 분류 및 설명
+                place_type = "관광지"
                 if category == 'restaurant':
                     if 'korean' in cuisine: place_type = "한식"
                     elif any(x in cuisine for x in ['burger', 'pizza', 'italian', 'french', 'german', 'american', 'steak']): place_type = "양식"
                     elif any(x in cuisine for x in ['chinese', 'vietnamese', 'thai', 'japanese', 'sushi', 'asian', 'indian']): place_type = "아시안"
                     elif any(x in cuisine for x in ['coffee', 'cafe', 'cake']): place_type = "카페"
-                    else: place_type = "일반"
+                    else: place_type = "식당"
                         
                     if cuisine_filter and "전체" not in cuisine_filter: 
                         if place_type not in cuisine_filter: continue
                 elif category == 'hotel':
                     place_type = "숙소"
-                else:
-                    place_type = "관광지"
 
                 # 구글 검색 링크 생성
                 search_query = f"{name} Berlin".replace(" ", "+")
@@ -108,7 +106,7 @@ def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
                     "lat": element['lat'],
                     "lng": element['lon'],
                     "type": category,
-                    "desc": place_type, # 팝업에 띄울 설명
+                    "desc": place_type, 
                     "link": google_link
                 })
         return results
@@ -117,34 +115,22 @@ def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
 
 @st.cache_data
 def load_and_process_crime_data(csv_file):
-    """
-    첫 번째 파일(Berlin_crimes.csv) 형식에 맞춰 데이터를 처리합니다.
-    """
     try:
-        # 1. 파일 읽기
         df = pd.read_csv(csv_file, on_bad_lines='skip')
-        
-        # 2. 필수 컬럼 확인 (District 컬럼이 있어야 함)
-        if 'District' not in df.columns:
-            return pd.DataFrame()
+        if 'District' not in df.columns: return pd.DataFrame()
 
-        # 3. 최신 연도 필터링
         if 'Year' in df.columns:
             latest_year = df['Year'].max()
             df = df[df['Year'] == latest_year]
         
-        # 4. 범죄 건수 합산
-        # 숫자형 컬럼만 선택해서 합침
         numeric_cols = df.select_dtypes(include=['number']).columns
-        # 합계에서 제외할 컬럼들
         cols_to_exclude = ['Year', 'Code', 'District', 'Location', 'lat', 'lng', 'Lat', 'Lng']
         cols_to_sum = [c for c in numeric_cols if c not in cols_to_exclude]
         
         df['Total_Crime'] = df[cols_to_sum].sum(axis=1)
         
-        # 5. 구(District)별로 묶기
         district_df = df.groupby('District')['Total_Crime'].sum().reset_index()
-        district_df['District'] = district_df['District'].str.strip() # 공백 제거
+        district_df['District'] = district_df['District'].str.strip()
         
         return district_df
     except Exception:
@@ -171,7 +157,7 @@ def search_location(query):
     return None, None, None
 
 # ---------------------------------------------------------
-# 3. 여행 코스 데이터 (설명 + 링크 포함)
+# 3. 여행 코스 데이터
 # ---------------------------------------------------------
 courses = {
     "🌳 Theme 1: 숲과 힐링 (티어가르텐)": [
@@ -228,7 +214,7 @@ courses = {
 # 4. 메인 화면 구성
 # ---------------------------------------------------------
 st.title("🇩🇪 베를린 풀코스 가이드")
-st.caption("클릭하면 구글 상세정보로 이동합니다!")
+st.caption("핀을 클릭하면 구글 검색으로 이동합니다!")
 
 # 세션 초기화
 if 'reviews' not in st.session_state: st.session_state['reviews'] = {}
@@ -279,7 +265,7 @@ selected_cuisines = st.sidebar.multiselect("원하는 종류를 선택하세요"
 tab1, tab2, tab3 = st.tabs(["🗺️ 자유 탐험", "🚩 추천 코스 (6 Themes)", "💬 여행자 수다방"])
 
 # =========================================================
-# TAB 1: 자유 탐험 (팝업에 구글 링크 추가됨)
+# TAB 1: 자유 탐험 (아이콘 적용 + 팝업 링크)
 # =========================================================
 with tab1:
     center = st.session_state['map_center']
@@ -293,10 +279,8 @@ with tab1:
             icon=folium.Icon(color='red', icon='info-sign')
         ).add_to(m1)
 
-    # 1. 범죄 지도 (Berlin_crimes.csv - 첫번째 파일)
+    # 1. 범죄 지도
     if show_crime:
-        # 첫 번째 파일을 원하시면 'Raw URL'을 첫 번째 파일의 것으로 넣어주세요!
-        # 아래는 파일명을 그대로 쓴 예시입니다. 오류 시 Raw URL을 추천합니다.
         crime_df = load_and_process_crime_data("Berlin_crimes.csv")
         if not crime_df.empty:
             folium.Choropleth(
@@ -310,16 +294,17 @@ with tab1:
                 name="범죄"
             ).add_to(m1)
 
-    # 2. 음식점
+    # 2. 음식점 (아이콘 + 링크)
     if selected_cuisines:
         places = get_osm_places('restaurant', center[0], center[1], 3000, selected_cuisines)
         fg_food = folium.FeatureGroup(name="식당")
         for p in places:
+            # 아이콘 색상 설정
             c_color = 'green'
             if p['desc'] == '한식': c_color = 'red'
             elif p['desc'] == '카페': c_color = 'beige'
             
-            # ★ 팝업 HTML 생성 (링크 포함)
+            # 팝업 HTML (구글 링크 포함)
             popup_html = f"""
             <div style="font-family:sans-serif; width:150px">
                 <b>{p['name']}</b><br>
@@ -328,12 +313,15 @@ with tab1:
             </div>
             """
             
-            folium.CircleMarker(
-                [p['lat'], p['lng']], radius=5, color=c_color, fill=True, popup=popup_html, fill_opacity=0.8
+            # 점(Circle) 대신 아이콘(Marker) 사용
+            folium.Marker(
+                [p['lat'], p['lng']], 
+                popup=popup_html,
+                icon=folium.Icon(color=c_color, icon='cutlery', prefix='fa')
             ).add_to(fg_food)
         fg_food.add_to(m1)
 
-    # 3. 호텔 & 관광지
+    # 3. 호텔 (아이콘 + 링크)
     if show_hotel:
         hotels = get_osm_places('hotel', center[0], center[1], 3000)
         fg_hotel = folium.FeatureGroup(name="호텔")
@@ -341,14 +329,18 @@ with tab1:
             popup_html = f"""
             <div style="font-family:sans-serif; width:150px">
                 <b>{h['name']}</b><br>
+                <span style="color:gray">숙소</span><br>
                 <a href="{h['link']}" target="_blank" style="text-decoration:none; color:blue;">👉 구글 상세정보</a>
             </div>
             """
             folium.Marker(
-                [h['lat'], h['lng']], popup=popup_html, icon=folium.Icon(color='blue', icon='bed', prefix='fa')
+                [h['lat'], h['lng']], 
+                popup=popup_html, 
+                icon=folium.Icon(color='blue', icon='bed', prefix='fa')
             ).add_to(fg_hotel)
         fg_hotel.add_to(m1)
 
+    # 4. 관광지 (아이콘 + 링크)
     if show_tour:
         tours = get_osm_places('tourism', center[0], center[1], 3000)
         fg_tour = folium.FeatureGroup(name="관광")
@@ -356,18 +348,22 @@ with tab1:
             popup_html = f"""
             <div style="font-family:sans-serif; width:150px">
                 <b>{t['name']}</b><br>
+                <span style="color:gray">관광지</span><br>
                 <a href="{t['link']}" target="_blank" style="text-decoration:none; color:blue;">👉 구글 상세정보</a>
             </div>
             """
-            folium.CircleMarker(
-                [t['lat'], t['lng']], radius=5, color='purple', fill=True, popup=popup_html
+            # 점 대신 카메라 아이콘 사용
+            folium.Marker(
+                [t['lat'], t['lng']], 
+                popup=popup_html,
+                icon=folium.Icon(color='purple', icon='camera', prefix='fa')
             ).add_to(fg_tour)
         fg_tour.add_to(m1)
 
     st_folium(m1, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스 (지도 핀에도 링크 추가)
+# TAB 2: 추천 코스
 # =========================================================
 with tab2:
     st.subheader("🌟 테마별 추천 코스")
@@ -386,7 +382,6 @@ with tab2:
             color = 'orange' if item['type'] == 'food' else 'blue'
             icon = 'cutlery' if item['type'] == 'food' else 'camera'
             
-            # 구글 검색 링크 생성
             link = f"https://www.google.com/search?q={item['name'].replace(' ', '+')}+Berlin"
             
             popup_html = f"""
@@ -420,7 +415,6 @@ with tab2:
 with tab3:
     col_chat, col_ai = st.columns([1, 1])
     
-    # --- 장소별 리뷰 ---
     with col_chat:
         st.subheader("💬 장소별 리뷰")
         input_method = st.radio("장소 선택 방식", ["목록에서 선택", "직접 입력하기"], horizontal=True, label_visibility="collapsed")
@@ -452,7 +446,6 @@ with tab3:
 
         st.divider()
         
-        # --- 추천 게시판 ---
         st.subheader("👍 나만의 장소 추천해요")
         with st.form("recommend_form", clear_on_submit=True):
             rec_place = st.text_input("장소 이름")
@@ -468,7 +461,6 @@ with tab3:
                 del st.session_state['recommendations'][i]
                 st.rerun()
 
-    # --- AI 비서 ---
     with col_ai:
         st.subheader("🤖 Gemini 가이드")
         chat_area = st.container(height=500)
