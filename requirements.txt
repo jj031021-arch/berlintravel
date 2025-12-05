@@ -1,8 +1,8 @@
 streamlit
 pandas
-googlemaps
 folium
 streamlit-folium
 requests
 google-generativeai
+googlemaps
 plotly
