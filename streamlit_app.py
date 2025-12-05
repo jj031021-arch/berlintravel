@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 import requests
 import google.generativeai as genai
 import googlemaps
+import plotly.express as px  # <--- 시각화용 라이브러리 추가
 
 # ---------------------------------------------------------
 # 1. 설정 및 API 키 로드
@@ -51,9 +52,6 @@ def get_weather():
 
 @st.cache_data
 def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
-    """
-    OpenStreetMap 데이터 가져오기 + 구글 검색 링크 생성
-    """
     overpass_url = "http://overpass-api.de/api/interpreter"
     
     if category == 'restaurant':
@@ -83,7 +81,6 @@ def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
                 cuisine = element['tags'].get('cuisine', 'general').lower()
                 name = element['tags']['name']
                 
-                # 음식점 분류 및 설명
                 place_type = "관광지"
                 if category == 'restaurant':
                     if 'korean' in cuisine: place_type = "한식"
@@ -97,7 +94,6 @@ def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
                 elif category == 'hotel':
                     place_type = "숙소"
 
-                # 구글 검색 링크 생성
                 search_query = f"{name} Berlin".replace(" ", "+")
                 google_link = f"https://www.google.com/search?q={search_query}"
 
@@ -114,7 +110,22 @@ def get_osm_places(category, lat, lng, radius_m=2000, cuisine_filter=None):
         return []
 
 @st.cache_data
+def load_crime_data_raw(csv_file):
+    """
+    범죄 데이터를 통계 분석용으로 로드합니다. (Raw Data)
+    """
+    try:
+        df = pd.read_csv(csv_file, on_bad_lines='skip')
+        if 'District' not in df.columns: return pd.DataFrame()
+        return df
+    except:
+        return pd.DataFrame()
+
+@st.cache_data
 def load_and_process_crime_data(csv_file):
+    """
+    지도 표시용 데이터 (구별 합계)
+    """
     try:
         df = pd.read_csv(csv_file, on_bad_lines='skip')
         if 'District' not in df.columns: return pd.DataFrame()
@@ -262,10 +273,11 @@ cuisine_options = ["전체", "한식", "양식", "아시안", "카페", "일반/
 selected_cuisines = st.sidebar.multiselect("원하는 종류를 선택하세요", cuisine_options, default=["전체"])
 
 # --- 메인 탭 ---
-tab1, tab2, tab3 = st.tabs(["🗺️ 자유 탐험", "🚩 추천 코스 (6 Themes)", "💬 여행자 수다방"])
+# [TAB 4] 추가됨!
+tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 자유 탐험", "🚩 추천 코스 (6 Themes)", "💬 여행자 수다방", "📊 범죄 통계 분석"])
 
 # =========================================================
-# TAB 1: 자유 탐험 (아이콘 적용 + 팝업 링크)
+# TAB 1: 자유 탐험
 # =========================================================
 with tab1:
     center = st.session_state['map_center']
@@ -294,17 +306,15 @@ with tab1:
                 name="범죄"
             ).add_to(m1)
 
-    # 2. 음식점 (아이콘 + 링크)
+    # 2. 음식점
     if selected_cuisines:
         places = get_osm_places('restaurant', center[0], center[1], 3000, selected_cuisines)
         fg_food = folium.FeatureGroup(name="식당")
         for p in places:
-            # 아이콘 색상 설정
             c_color = 'green'
             if p['desc'] == '한식': c_color = 'red'
             elif p['desc'] == '카페': c_color = 'beige'
             
-            # 팝업 HTML (구글 링크 포함)
             popup_html = f"""
             <div style="font-family:sans-serif; width:150px">
                 <b>{p['name']}</b><br>
@@ -313,7 +323,6 @@ with tab1:
             </div>
             """
             
-            # 점(Circle) 대신 아이콘(Marker) 사용
             folium.Marker(
                 [p['lat'], p['lng']], 
                 popup=popup_html,
@@ -321,7 +330,7 @@ with tab1:
             ).add_to(fg_food)
         fg_food.add_to(m1)
 
-    # 3. 호텔 (아이콘 + 링크)
+    # 3. 호텔
     if show_hotel:
         hotels = get_osm_places('hotel', center[0], center[1], 3000)
         fg_hotel = folium.FeatureGroup(name="호텔")
@@ -340,7 +349,7 @@ with tab1:
             ).add_to(fg_hotel)
         fg_hotel.add_to(m1)
 
-    # 4. 관광지 (아이콘 + 링크)
+    # 4. 관광지
     if show_tour:
         tours = get_osm_places('tourism', center[0], center[1], 3000)
         fg_tour = folium.FeatureGroup(name="관광")
@@ -352,7 +361,6 @@ with tab1:
                 <a href="{t['link']}" target="_blank" style="text-decoration:none; color:blue;">👉 구글 상세정보</a>
             </div>
             """
-            # 점 대신 카메라 아이콘 사용
             folium.Marker(
                 [t['lat'], t['lng']], 
                 popup=popup_html,
@@ -451,15 +459,30 @@ with tab3:
             rec_place = st.text_input("장소 이름")
             rec_desc = st.text_input("이유 (한 줄)")
             if st.form_submit_button("추천 등록"):
-                st.session_state['recommendations'].insert(0, {"place": rec_place, "desc": rec_desc})
+                st.session_state['recommendations'].insert(0, {"place": rec_place, "desc": rec_desc, "replies": []})
                 st.rerun()
         
         for i, rec in enumerate(st.session_state['recommendations']):
+            st.markdown(f"**{i+1}. {rec['place']}**")
             c1, c2 = st.columns([8, 1])
-            c1.success(f"**{rec['place']}**: {rec['desc']}")
+            c1.success(rec['desc'])
+            
             if c2.button("🗑️", key=f"del_rec_{i}"):
                 del st.session_state['recommendations'][i]
                 st.rerun()
+
+            if 'replies' in rec and rec['replies']:
+                for reply in rec['replies']:
+                    st.caption(f"↳ 💬 {reply}")
+
+            with st.expander("💬 댓글 달기"):
+                reply_txt = st.text_input("댓글 내용", key=f"reply_input_{i}")
+                if st.button("등록", key=f"reply_btn_{i}"):
+                    if 'replies' not in rec:
+                        rec['replies'] = []
+                    rec['replies'].append(reply_txt)
+                    st.rerun()
+            st.write("---")
 
     with col_ai:
         st.subheader("🤖 Gemini 가이드")
@@ -473,3 +496,98 @@ with tab3:
                 resp = get_gemini_response(prompt)
                 st.write(resp)
             st.session_state['messages'].append({"role": "assistant", "content": resp})
+
+# =========================================================
+# TAB 4: 범죄 통계 분석 (새로 추가됨!)
+# =========================================================
+with tab4:
+    st.header("📊 베를린 범죄 데이터 대시보드")
+    st.caption("데이터 원본: Berlin_crimes.csv (경찰청 통계)")
+
+    # 데이터 로드
+    raw_df = load_crime_data_raw("Berlin_crimes.csv")
+
+    if not raw_df.empty and 'Year' in raw_df.columns:
+        # 필터링 옵션
+        c_filter1, c_filter2 = st.columns(2)
+        with c_filter1:
+            years = sorted(raw_df['Year'].unique(), reverse=True)
+            selected_year = st.selectbox("📅 분석 연도 선택", years)
+        with c_filter2:
+            districts = sorted(raw_df['District'].unique())
+            selected_districts = st.multiselect("🏙️ 구(District) 선택 (비워두면 전체)", districts, default=districts)
+        
+        # 선택한 연도 데이터
+        df_year = raw_df[raw_df['Year'] == selected_year]
+        if selected_districts:
+            df_year = df_year[df_year['District'].isin(selected_districts)]
+        
+        # 범죄 유형 컬럼 정의
+        crime_types = ['Robbery', 'Street_robbery', 'Injury', 'Agg_assault', 'Threat', 'Theft', 'Car', 'From_car', 'Bike', 'Burglary', 'Fire', 'Arson', 'Damage', 'Graffiti', 'Drugs']
+        available_types = [c for c in crime_types if c in df_year.columns]
+        
+        # [섹션 1] 핵심 지표 (KPI)
+        st.markdown("### 📌 핵심 지표")
+        kpi1, kpi2, kpi3 = st.columns(3)
+        
+        total_crimes = df_year[available_types].sum().sum()
+        most_crime_district = df_year.groupby('District')[available_types].sum().sum(axis=1).idxmax()
+        most_common_crime = df_year[available_types].sum().idxmax()
+        
+        kpi1.metric("총 범죄 발생 건수", f"{total_crimes:,}건")
+        kpi2.metric("범죄 최다 발생 지역", most_crime_district)
+        kpi3.metric("가장 빈번한 범죄 유형", most_common_crime)
+        
+        st.divider()
+
+        # [섹션 2] 차트 (반응형)
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            st.subheader("🏙️ 구별 범죄 발생 순위")
+            # 구별 합계 계산
+            district_sum = df_year.groupby('District')[available_types].sum().sum(axis=1).reset_index(name='Count').sort_values('Count', ascending=True)
+            
+            fig_bar = px.bar(
+                district_sum, 
+                x='Count', y='District', 
+                orientation='h',
+                text='Count',
+                color='Count',
+                color_continuous_scale='Reds',
+                title=f"{selected_year}년 구별 범죄 현황"
+            )
+            fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+        with chart_col2:
+            st.subheader("🥧 범죄 유형별 비율")
+            # 범죄 유형별 합계
+            type_sum = df_year[available_types].sum().reset_index(name='Count').rename(columns={'index': 'Type'})
+            
+            fig_pie = px.pie(
+                type_sum, 
+                values='Count', names='Type',
+                title=f"{selected_year}년 범죄 유형 구성",
+                hole=0.4
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+        # [섹션 3] 연도별 추이 (Line Chart)
+        st.subheader("📈 연도별 범죄 추이 분석")
+        # 전체 연도 데이터 집계
+        yearly_trend = raw_df.groupby('Year')[available_types].sum().sum(axis=1).reset_index(name='Total')
+        
+        fig_line = px.line(
+            yearly_trend, 
+            x='Year', y='Total',
+            markers=True,
+            title="연간 총 범죄 발생 추이",
+            labels={'Total': '총 범죄 수'}
+        )
+        fig_line.update_layout(xaxis=dict(tickmode='linear')) # 모든 연도 표시
+        st.plotly_chart(fig_line, use_container_width=True)
+
+    else:
+        st.error("데이터를 불러올 수 없거나 'Year' 컬럼이 없습니다.")
