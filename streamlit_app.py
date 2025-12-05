@@ -314,5 +314,3 @@ with tab1:
             <div style="font-family:sans-serif; width:150px">
                 <b>{p['name']}</b><br>
                 <span style="
-    else:
-        st.error("데이터를 불러올 수 없거나 'Year' 컬럼이 없습니다.")
