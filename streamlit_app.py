@@ -58,7 +58,6 @@ def get_exchange_rate_chart():
 
 # [날씨] 상태 코드 해석 (비/눈/구름)
 def get_weather_desc(code):
-    # WMO Weather interpretation codes (WW)
     if code == 0: return "☀️ 맑음"
     if code in [1, 2, 3]: return "🌥️ 구름 조금/흐림"
     if code in [45, 48]: return "🌫️ 안개"
@@ -124,23 +123,35 @@ def load_crime_data_excel(file_name):
     except:
         return pd.DataFrame()
 
-def translate_crime_columns(df):
-    translation_map = {
-        'Raub': '강도', 'Straßenraub, Handtaschen-raub': '소매치기',
-        'Körper-verletzungen -insgesamt-': '상해(전체)', 'Gefährl. und schwere Körper-verletzung': '중상해',
-        'Diebstahl -insgesamt-': '절도(전체)', 'Diebstahl von Kraftwagen': '차량절도',
-        'Diebstahl an/aus Kfz': '차량털이', 'Fahrrad-diebstahl': '자전거절도',
-        'Wohnraum-einbruch': '빈집털이', 'Branddelikte -insgesamt-': '화재범죄',
-        'Sach-beschädigung -insgesamt-': '기물파손', 'Sach-beschädigung durch Graffiti': '그래피티',
-        'Rauschgift-delikte': '마약범죄', 'Straftaten -insgesamt-': '총범죄'
+# ★ 범죄명 한국어 변환 맵핑 ★
+def get_crime_translation_map():
+    return {
+        'Raub': '강도',
+        'Straßenraub, Handtaschen-raub': '소매치기',
+        'Körper-verletzungen -insgesamt-': '상해(전체)',
+        'Gefährl. und schwere Körper-verletzung': '중상해',
+        'Freiheits-beraubung, Nötigung, Bedrohung, Nachstellung': '협박/스토킹',
+        'Diebstahl -insgesamt-': '절도(전체)',
+        'Diebstahl von Kraftwagen': '차량절도',
+        'Diebstahl an/aus Kfz': '차량털이',
+        'Fahrrad-diebstahl': '자전거절도',
+        'Wohnraum-einbruch': '빈집털이',
+        'Branddelikte -insgesamt-': '화재범죄',
+        'Brand-stiftung': '방화',
+        'Sach-beschädigung -insgesamt-': '기물파손',
+        'Sach-beschädigung durch Graffiti': '그래피티',
+        'Rauschgift-delikte': '마약범죄',
+        'Straftaten -insgesamt-': '총범죄',
+        'Kieztaten': '기타 지역범죄'
     }
-    return translation_map
 
 @st.cache_data
 def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
     overpass_url = "http://overpass-api.de/api/interpreter"
+    
+    # 호텔 태그 수정 (더 포괄적으로)
     if category == 'restaurant': tag = '["amenity"="restaurant"]'
-    elif category == 'hotel': tag = '["tourism"="hotel"]'
+    elif category == 'hotel': tag = '["tourism"~"hotel|hostel|guest_house"]' 
     elif category == 'tourism': tag = '["tourism"~"attraction|museum|artwork|viewpoint"]'
     else: return []
 
@@ -149,16 +160,21 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
         response = requests.get(overpass_url, params={'data': query})
         data = response.json()
         results = []
+        
         cuisine_map = {
             "한식": ["korean"], "양식": ["italian","french","german","american","burger","pizza","steak"],
             "일식": ["japanese","sushi","ramen"], "중식": ["chinese","dim sum"],
             "아시안": ["vietnamese","thai","asian","indian"], "카페": ["coffee","cafe","cake","bakery"]
         }
+
         for element in data['elements']:
-            if 'tags' in element and 'name' in element['tags']:
-                name = element['tags']['name']
+            if 'tags' in element:
+                name = element['tags'].get('name', '이름 없음')
+                if name == '이름 없음': continue
+
                 raw_cuisine = element['tags'].get('cuisine', 'general').lower()
                 detected_type = "기타"
+                
                 if category == 'restaurant':
                     is_match = False
                     if cuisine_filter and "전체" not in cuisine_filter:
@@ -174,6 +190,7 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
 
                 search_query = f"{name} Berlin".replace(" ", "+")
                 link = f"https://www.google.com/search?q={search_query}"
+                
                 desc = "장소"
                 if category == 'restaurant': desc = f"음식점 ({detected_type})"
                 elif category == 'hotel': desc = "숙박시설"
@@ -250,7 +267,7 @@ courses = {
 }
 
 # ---------------------------------------------------------
-# 4. UI 구성 (레이아웃 개선)
+# 4. UI 구성
 # ---------------------------------------------------------
 st.title("🇩🇪 베를린 통합 여행 가이드")
 st.caption("2023년 데이터 기반 안전 여행 & 맞춤 코스")
@@ -261,13 +278,13 @@ if 'messages' not in st.session_state: st.session_state['messages'] = []
 if 'map_center' not in st.session_state: st.session_state['map_center'] = [52.5200, 13.4050]
 if 'search_marker' not in st.session_state: st.session_state['search_marker'] = None
 
-# [상단: 환율 & 날씨] (개선됨)
+# [상단: 환율 & 날씨]
 c1, c2 = st.columns(2)
 with c1:
     rate, fig_rate = get_exchange_rate_chart()
-    st.metric("💶 유로 환율", f"{rate:.0f}원", delta="1 EUR 기준")
+    st.metric("💶 유로 환율 (1 EUR)", f"{rate:.0f}원", delta="실시간")
     if fig_rate:
-        with st.expander("📉 1개월 변동 추이 (클릭)", expanded=False):
+        with st.expander("📉 1개월 환율 추이 (클릭)", expanded=False):
             st.plotly_chart(fig_rate, use_container_width=True)
 
 with c2:
@@ -334,7 +351,7 @@ with tab1:
         fg_food.add_to(m)
 
     if show_hotel:
-        places = get_osm_places('hotel', center[0], center[1])
+        places = get_osm_places('hotel', center[0], center[1], 3000)
         fg_hotel = folium.FeatureGroup(name="호텔")
         for p in places:
             html = f"<div style='width:150px'><b>{p['name']}</b><br><span style='color:grey'>{p['desc']}</span><br><a href='{p['link']}' target='_blank'>구글 검색</a></div>"
@@ -342,7 +359,7 @@ with tab1:
         fg_hotel.add_to(m)
 
     if show_tour:
-        places = get_osm_places('tourism', center[0], center[1])
+        places = get_osm_places('tourism', center[0], center[1], 3000)
         fg_tour = folium.FeatureGroup(name="관광")
         for p in places:
             html = f"<div style='width:150px'><b>{p['name']}</b><br><span style='color:grey'>{p['desc']}</span><br><a href='{p['link']}' target='_blank'>구글 검색</a></div>"
@@ -352,7 +369,7 @@ with tab1:
     st_folium(m, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스 (레이아웃 완벽 개선)
+# TAB 2: 추천 코스 (레이아웃 고정)
 # =========================================================
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
@@ -362,7 +379,6 @@ with tab2:
     
     show_crime_course = st.checkbox("🚨 이 지도에도 범죄 위험도 표시", value=False)
 
-    # ★ 비율 2:1로 조정하여 지도와 글자 간격 밀착
     c_col1, c_col2 = st.columns([2, 1])
     
     with c_col1:
@@ -388,12 +404,10 @@ with tab2:
         st_folium(m2, height=600, use_container_width=True)
         
     with c_col2:
-        # ★ 스타일로 여백 최소화
         st.markdown(f"### 🚶 {selected_theme}")
         st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
         
         for idx, spot in enumerate(course_data):
-            # 깔끔한 카드 형태 디자인
             st.info(f"**{idx+1}. {spot['name']}**\n\n{spot['desc']}")
             q = spot['name'].replace(" ", "+") + "+Berlin"
             st.markdown(f"[👉 구글 검색 바로가기](https://www.google.com/search?q={q})")
@@ -449,13 +463,13 @@ with tab3:
         st.session_state['messages'].append({"role": "assistant", "content": resp})
 
 # =========================================================
-# TAB 4: 범죄 통계 (한글화)
+# TAB 4: 범죄 통계 (한글화 완료)
 # =========================================================
 with tab4:
-    st.header("📊 베를린 범죄 데이터 분석 (한국어)")
+    st.header("📊 베를린 범죄 데이터 분석")
     
     df_stat = load_crime_data_excel(CRIME_FILE_NAME)
-    trans_map = translate_crime_columns(df_stat)
+    trans_map = get_crime_translation_map()
     
     if not df_stat.empty:
         total_crime = df_stat['Total_Crime'].sum()
