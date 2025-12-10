@@ -49,27 +49,18 @@ def get_weather():
 
 @st.cache_data
 def load_crime_data_excel(file_name):
-    """
-    엑셀(.xlsx) 파일을 읽어서 지도용 데이터로 변환합니다.
-    """
     try:
-        # 1. 엑셀 읽기 (앞 4줄 건너뛰기 - skiprows=4)
         df = pd.read_excel(file_name, skiprows=4, engine='openpyxl')
-
-        # 2. 컬럼명 정리 (\n 제거)
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
-
-        # 3. 필요한 컬럼 찾기 (구 이름, 총 범죄 수)
+        
         district_col = None
         total_col = None
-        
         for c in df.columns:
             if 'Bezeichnung' in c: district_col = c
             if 'Straftaten' in c and 'insgesamt' in c: total_col = c
         
         if not district_col: return pd.DataFrame()
 
-        # 4. 베를린 12개 구 이름만 필터링
         berlin_districts = [
             "Mitte", "Friedrichshain-Kreuzberg", "Pankow", "Charlottenburg-Wilmersdorf", 
             "Spandau", "Steglitz-Zehlendorf", "Tempelhof-Schöneberg", "Neukölln", 
@@ -77,22 +68,23 @@ def load_crime_data_excel(file_name):
         ]
         df = df[df[district_col].isin(berlin_districts)].copy()
 
-        # 5. 숫자 데이터 정제 (문자 -> 숫자)
-        if total_col:
-            df[total_col] = df[total_col].astype(str).str.replace('.', '', regex=False)
-            df['Total_Crime'] = pd.to_numeric(df[total_col], errors='coerce').fillna(0)
-        
-        # 통계용 컬럼도 정제
-        cols_to_clean = [c for c in df.columns if c not in [district_col, 'LOR-Schlüssel (Bezirksregion)', 'Total_Crime']]
+        # 숫자 정제
+        cols_to_clean = [c for c in df.columns if c != district_col and 'LOR' not in c]
         for c in cols_to_clean:
             df[c] = df[c].astype(str).str.replace('.', '', regex=False)
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
-        # 6. 컬럼명 표준화
         df = df.rename(columns={district_col: 'District'})
         
-        return df
+        # 총계 컬럼 확인
+        if total_col:
+            df['Total_Crime'] = df[total_col]
+        else:
+            # 없으면 숫자형 컬럼 합계로 생성
+            crime_cols = [c for c in df.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
+            df['Total_Crime'] = df[crime_cols].sum(axis=1)
 
+        return df
     except Exception:
         return pd.DataFrame()
 
@@ -100,6 +92,7 @@ def load_crime_data_excel(file_name):
 def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
     overpass_url = "http://overpass-api.de/api/interpreter"
     
+    tag = ""
     if category == 'restaurant': tag = '["amenity"="restaurant"]'
     elif category == 'hotel': tag = '["tourism"="hotel"]'
     elif category == 'tourism': tag = '["tourism"~"attraction|museum|artwork|viewpoint"]'
@@ -117,7 +110,6 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
         data = response.json()
         results = []
         
-        # 음식점 유형 분류
         cuisine_map = {
             "한식": ["korean"],
             "양식": ["italian", "french", "german", "american", "burger", "pizza", "steak", "western"],
@@ -192,7 +184,7 @@ courses = {
     "🌳 Theme 1: 숲과 힐링": [
         {"name": "1. 전승기념탑", "lat": 52.5145, "lng": 13.3501, "desc": "베를린 전경이 한눈에 보이는 황금 천사상"},
         {"name": "2. 티어가르텐 산책", "lat": 52.5135, "lng": 13.3575, "desc": "도심 속 거대한 허파"},
-        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든"},
+        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든 (피자/맥주)"},
         {"name": "4. 베를린 동물원", "lat": 52.5079, "lng": 13.3377, "desc": "세계 최대 종을 보유한 동물원"},
         {"name": "5. 카이저 빌헬름 교회", "lat": 52.5048, "lng": 13.3350, "desc": "전쟁의 상처를 간직한 교회"}
     ],
@@ -296,7 +288,7 @@ with tab1:
     center = st.session_state['map_center']
     m = folium.Map(location=center, zoom_start=14)
 
-    # 1. 범죄 데이터 레이어 (엑셀)
+    # 1. 범죄 데이터 레이어
     if show_crime:
         crime_df = load_crime_data_excel(CRIME_FILE_NAME)
         if not crime_df.empty:
@@ -313,7 +305,7 @@ with tab1:
         sm = st.session_state['search_marker']
         folium.Marker([sm['lat'], sm['lng']], popup=sm['name'], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
 
-    # 3. 장소 마커 (아이콘 적용)
+    # 3. 장소 마커
     if show_food:
         places = get_osm_places('restaurant', center[0], center[1], 3000, selected_cuisines)
         fg_food = folium.FeatureGroup(name="맛집")
@@ -350,7 +342,7 @@ with tab1:
     st_folium(m, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스 (클릭 가능, 펼침, 지도 크게)
+# TAB 2: 추천 코스 (글씨 확대 + 지도 크게 + 범죄 필터)
 # =========================================================
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
@@ -359,14 +351,17 @@ with tab2:
     selected_theme = st.radio("테마를 선택하세요:", themes, horizontal=True)
     course_data = courses[selected_theme]
     
-    c_col1, c_col2 = st.columns([1.5, 1])
+    # 지도 위 범죄 필터 추가
+    show_crime_course = st.checkbox("🚨 이 지도에도 범죄 위험도 표시", value=False)
+
+    c_col1, c_col2 = st.columns([1.5, 1]) # 지도 영역 비율 확대
     
     with c_col1:
         # 코스 지도 (크게)
         m2 = folium.Map(location=[course_data[2]['lat'], course_data[2]['lng']], zoom_start=13)
         
-        # 여기도 범죄 레이어 추가 (필터 연동)
-        if show_crime:
+        # 범죄 레이어 추가 (선택 시)
+        if show_crime_course:
             crime_df = load_crime_data_excel(CRIME_FILE_NAME)
             if not crime_df.empty:
                 folium.Choropleth(
@@ -388,48 +383,53 @@ with tab2:
             ).add_to(m2)
         
         folium.PolyLine(points, color="red", weight=4, opacity=0.7).add_to(m2)
-        st_folium(m2, height=700)
+        st_folium(m2, height=700) # 지도 높이 700px로 확대
         
     with c_col2:
-        st.markdown(f"### {selected_theme} 상세")
-        # 리스트 펼쳐서 보여주기
+        st.markdown(f"### 🚶 {selected_theme}")
+        st.write("---")
+        # 리스트 펼쳐서 보여주기 + 글씨 크기 확대
         for idx, spot in enumerate(course_data):
-            st.markdown(f"**{idx+1}. {spot['name']}**")
-            st.caption(spot['desc'])
+            st.markdown(f"#### {idx+1}. {spot['name']}")
+            st.write(f"📝 {spot['desc']}")
             q = spot['name'].replace(" ", "+") + "+Berlin"
-            st.markdown(f"[👉 구글 검색](https://www.google.com/search?q={q})")
-            st.write("---")
+            st.markdown(f"[👉 구글 검색 바로가기](https://www.google.com/search?q={q})")
+            st.write("") # 빈 줄
 
 # =========================================================
-# TAB 3: 커뮤니티 & AI
+# TAB 3: 커뮤니티 & AI (분리형 구조)
 # =========================================================
 with tab3:
     col_review, col_rec = st.columns(2)
     
     # 1. 장소별 후기
     with col_review:
-        st.subheader("💬 장소별 후기")
+        st.subheader("💬 장소별 후기 남기기")
+        st.info("다녀오신 장소에 대한 솔직한 후기를 공유해주세요.")
+        
         all_places = sorted(list(set([p['name'] for v in courses.values() for p in v])))
-        target_place = st.selectbox("어떤 장소에 다녀오셨나요?", ["선택하세요"] + all_places)
+        target_place = st.selectbox("장소 선택", ["선택하세요"] + all_places)
         
         if target_place != "선택하세요":
             if target_place not in st.session_state['reviews']:
                 st.session_state['reviews'][target_place] = []
                 
             with st.form(f"review_{target_place}"):
-                rv_text = st.text_area("후기를 남겨주세요")
-                if st.form_submit_button("후기 등록"):
+                rv_text = st.text_area("후기를 작성하세요")
+                if st.form_submit_button("등록"):
                     st.session_state['reviews'][target_place].append(rv_text)
                     st.rerun()
             
             if st.session_state['reviews'][target_place]:
                 st.write("---")
                 for rv in st.session_state['reviews'][target_place]:
-                    st.info(rv)
+                    st.success(f"🗣️ {rv}")
 
     # 2. 나만의 장소 추천
     with col_rec:
-        st.subheader("👍 나만의 장소 추천")
+        st.subheader("👍 나만의 숨은 명소 추천")
+        st.info("나만 알기 아까운 장소를 추천해주세요!")
+        
         with st.form("rec_form", clear_on_submit=True):
             name = st.text_input("장소 이름")
             reason = st.text_input("추천 이유")
@@ -440,16 +440,15 @@ with tab3:
         if st.session_state['recommendations']:
             st.write("---")
             for i, rec in enumerate(st.session_state['recommendations']):
-                st.markdown(f"**📍 {rec['place']}**")
-                st.success(rec['desc'])
-                for reply in rec['replies']:
-                    st.caption(f"↳ {reply}")
-                with st.expander("💬 댓글 달기"):
-                    reply_text = st.text_input("내용", key=f"re_{i}")
+                with st.expander(f"📍 {rec['place']}", expanded=True):
+                    st.write(f"📝 {rec['desc']}")
+                    for reply in rec['replies']:
+                        st.caption(f"↳ {reply}")
+                    
+                    r_text = st.text_input("댓글", key=f"re_{i}")
                     if st.button("등록", key=f"btn_{i}"):
-                        rec['replies'].append(reply_text)
+                        rec['replies'].append(r_text)
                         st.rerun()
-                st.divider()
 
     # 3. AI 챗봇
     st.divider()
@@ -466,7 +465,7 @@ with tab3:
         st.session_state['messages'].append({"role": "assistant", "content": resp})
 
 # =========================================================
-# TAB 4: 범죄 통계 분석 (Interactive)
+# TAB 4: 범죄 통계 분석 (Interactive - Dropdown 추가)
 # =========================================================
 with tab4:
     st.header("📊 베를린 범죄 데이터 상세 분석")
@@ -483,21 +482,51 @@ with tab4:
         
         st.divider()
         
+        # 1. 구별 상세 분석 (Dropdown Interactive)
+        st.subheader("🔍 구(District)별 상세 범죄 분석")
+        districts_list = sorted(df_stat['District'].unique())
+        selected_district_anal = st.selectbox("분석할 구를 선택하세요", districts_list)
+        
+        # 선택한 구의 데이터만 필터링
+        df_district_only = df_stat[df_stat['District'] == selected_district_anal]
+        
+        # 숫자형 컬럼(범죄 유형)만 추출
+        crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
+        
+        if crime_cols:
+            # 해당 구의 범죄 유형별 합계
+            district_crime_counts = df_district_only[crime_cols].sum().sort_values(ascending=False).head(5)
+            
+            fig_district_bar = px.bar(
+                x=district_crime_counts.values,
+                y=district_crime_counts.index,
+                orientation='h',
+                title=f"{selected_district_anal} 지역 TOP 5 범죄 유형",
+                labels={'x': '발생 건수', 'y': '범죄 유형'},
+                text=district_crime_counts.values,
+                color=district_crime_counts.values,
+                color_continuous_scale='Reds'
+            )
+            fig_district_bar.update_layout(yaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_district_bar, use_container_width=True)
+
+        st.divider()
+        
         c1, c2 = st.columns(2)
         
         with c1:
-            st.subheader("🏙️ 구별 범죄 분포 (Treemap)")
-            fig_tree = px.treemap(
-                df_stat, path=['District'], values='Total_Crime',
-                color='Total_Crime', color_continuous_scale='Reds',
-                title="구별 범죄 분포 (크기=범죄수)"
+            st.subheader("🏙️ 구별 범죄 분포")
+            df_sorted = df_stat.sort_values('Total_Crime', ascending=True)
+            fig_bar = px.bar(
+                df_sorted, x='Total_Crime', y='District', orientation='h',
+                text='Total_Crime', 
+                color='Total_Crime', color_continuous_scale='Reds'
             )
-            st.plotly_chart(fig_tree, use_container_width=True)
+            fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
+            st.plotly_chart(fig_bar, use_container_width=True)
             
         with c2:
-            st.subheader("🥧 범죄 유형 분석")
-            # 숫자형 컬럼만 추출
-            crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
+            st.subheader("🥧 전체 범죄 유형 비율")
             if crime_cols:
                 type_sums = df_stat[crime_cols].sum().sort_values(ascending=False).head(10)
                 fig_pie = px.pie(
@@ -506,10 +535,6 @@ with tab4:
                 )
                 fig_pie.update_traces(textposition='inside', textinfo='percent+label')
                 st.plotly_chart(fig_pie, use_container_width=True)
-        
-        st.subheader("📈 지역별 범죄 분포 (Box Plot)")
-        fig_box = px.box(df_stat, y='Total_Crime', points="all", title="구별 범죄 발생 수 분포")
-        st.plotly_chart(fig_box, use_container_width=True)
 
     else:
         st.warning("데이터를 분석할 수 없습니다. 엑셀 파일을 확인해주세요.")
