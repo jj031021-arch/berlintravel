@@ -8,7 +8,7 @@ import googlemaps
 import plotly.express as px
 
 # ---------------------------------------------------------
-# 🚨 파일 이름 설정 (업로드할 엑셀 파일명)
+# 🚨 파일 이름 설정 (GitHub에 올린 파일명)
 # ---------------------------------------------------------
 CRIME_FILE_NAME = "2023_berlin_crime.xlsx"
 
@@ -68,7 +68,6 @@ def load_crime_data_excel(file_name):
         ]
         df = df[df[district_col].isin(berlin_districts)].copy()
 
-        # 숫자 정제
         cols_to_clean = [c for c in df.columns if c != district_col and 'LOR' not in c]
         for c in cols_to_clean:
             df[c] = df[c].astype(str).str.replace('.', '', regex=False)
@@ -76,11 +75,9 @@ def load_crime_data_excel(file_name):
 
         df = df.rename(columns={district_col: 'District'})
         
-        # 총계 컬럼 확인
         if total_col:
             df['Total_Crime'] = df[total_col]
         else:
-            # 없으면 숫자형 컬럼 합계로 생성
             crime_cols = [c for c in df.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
             df['Total_Crime'] = df[crime_cols].sum(axis=1)
 
@@ -288,7 +285,7 @@ with tab1:
     center = st.session_state['map_center']
     m = folium.Map(location=center, zoom_start=14)
 
-    # 1. 범죄 데이터 레이어
+    # 1. 범죄 데이터 레이어 (엑셀)
     if show_crime:
         crime_df = load_crime_data_excel(CRIME_FILE_NAME)
         if not crime_df.empty:
@@ -305,7 +302,7 @@ with tab1:
         sm = st.session_state['search_marker']
         folium.Marker([sm['lat'], sm['lng']], popup=sm['name'], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
 
-    # 3. 장소 마커
+    # 3. 장소 마커 (아이콘 적용)
     if show_food:
         places = get_osm_places('restaurant', center[0], center[1], 3000, selected_cuisines)
         fg_food = folium.FeatureGroup(name="맛집")
@@ -342,7 +339,7 @@ with tab1:
     st_folium(m, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스 (글씨 확대 + 지도 크게 + 범죄 필터)
+# TAB 2: 추천 코스 (레이아웃 조정)
 # =========================================================
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
@@ -354,7 +351,8 @@ with tab2:
     # 지도 위 범죄 필터 추가
     show_crime_course = st.checkbox("🚨 이 지도에도 범죄 위험도 표시", value=False)
 
-    c_col1, c_col2 = st.columns([1.5, 1]) # 지도 영역 비율 확대
+    # 비율 조정: 지도(3) : 설명(2) -> 지도가 더 큼
+    c_col1, c_col2 = st.columns([3, 2])
     
     with c_col1:
         # 코스 지도 (크게)
@@ -383,7 +381,7 @@ with tab2:
             ).add_to(m2)
         
         folium.PolyLine(points, color="red", weight=4, opacity=0.7).add_to(m2)
-        st_folium(m2, height=700) # 지도 높이 700px로 확대
+        st_folium(m2, height=700) # 지도 높이 700px
         
     with c_col2:
         st.markdown(f"### 🚶 {selected_theme}")
