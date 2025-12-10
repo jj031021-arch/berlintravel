@@ -8,7 +8,7 @@ import googlemaps
 import plotly.express as px
 
 # ---------------------------------------------------------
-# 🚨 파일 이름 설정 (GitHub에 올린 파일명)
+# 🚨 파일 이름 설정 (엑셀 파일명)
 # ---------------------------------------------------------
 CRIME_FILE_NAME = "2023_berlin_crime.xlsx"
 
@@ -27,7 +27,7 @@ if GEMINI_API_KEY:
         pass
 
 # ---------------------------------------------------------
-# 2. 데이터 처리 함수 (엑셀/CSV 자동 감지)
+# 2. 데이터 처리 함수
 # ---------------------------------------------------------
 @st.cache_data
 def get_exchange_rate():
@@ -48,36 +48,19 @@ def get_weather():
         return {"temperature": 15.0, "weathercode": 0}
 
 @st.cache_data
-def load_crime_data(file_name):
-    """
-    엑셀(.xlsx) 또는 CSV 파일을 읽어서 지도용 데이터로 변환합니다.
-    """
-    df = pd.DataFrame()
+def load_crime_data_excel(file_name):
     try:
-        # 1. 엑셀로 읽기 시도
         df = pd.read_excel(file_name, skiprows=4, engine='openpyxl')
-    except:
-        try:
-            # 엑셀이 아니면 CSV로 읽기 시도 (혹시 몰라서)
-            df = pd.read_csv(file_name, skiprows=4, encoding='utf-8', on_bad_lines='skip')
-        except:
-            return pd.DataFrame()
-
-    try:
-        # 2. 컬럼명 정리 (\n 제거)
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
-
-        # 3. 필요한 컬럼 찾기 (구 이름, 총 범죄 수)
+        
         district_col = None
         total_col = None
-        
         for c in df.columns:
             if 'Bezeichnung' in c: district_col = c
             if 'Straftaten' in c and 'insgesamt' in c: total_col = c
         
         if not district_col: return pd.DataFrame()
 
-        # 4. 베를린 12개 구 이름만 필터링
         berlin_districts = [
             "Mitte", "Friedrichshain-Kreuzberg", "Pankow", "Charlottenburg-Wilmersdorf", 
             "Spandau", "Steglitz-Zehlendorf", "Tempelhof-Schöneberg", "Neukölln", 
@@ -85,29 +68,26 @@ def load_crime_data(file_name):
         ]
         df = df[df[district_col].isin(berlin_districts)].copy()
 
-        # 5. 숫자 데이터 정제
+        # 숫자 정제 및 총계 컬럼 처리
         if total_col:
             df[total_col] = df[total_col].astype(str).str.replace('.', '', regex=False)
             df['Total_Crime'] = pd.to_numeric(df[total_col], errors='coerce').fillna(0)
         
-        # 통계용 숫자 컬럼 정제
         cols_to_clean = [c for c in df.columns if c not in [district_col, 'LOR-Schlüssel (Bezirksregion)', 'Total_Crime']]
         for c in cols_to_clean:
             df[c] = df[c].astype(str).str.replace('.', '', regex=False)
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
-        # 6. 컬럼명 표준화
         df = df.rename(columns={district_col: 'District'})
-        
         return df
-
-    except Exception:
+    except:
         return pd.DataFrame()
 
 @st.cache_data
-def get_osm_places(category, lat, lng, radius_m=3000):
+def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
     overpass_url = "http://overpass-api.de/api/interpreter"
     
+    tag = ""
     if category == 'restaurant': tag = '["amenity"="restaurant"]'
     elif category == 'hotel': tag = '["tourism"="hotel"]'
     elif category == 'tourism': tag = '["tourism"~"attraction|museum|artwork|viewpoint"]'
@@ -124,16 +104,48 @@ def get_osm_places(category, lat, lng, radius_m=3000):
         response = requests.get(overpass_url, params={'data': query})
         data = response.json()
         results = []
+        
+        # 음식점 유형 매핑
+        cuisine_map = {
+            "한식": ["korean"],
+            "양식": ["italian", "french", "german", "american", "burger", "pizza", "steak", "western"],
+            "일식": ["japanese", "sushi", "ramen"],
+            "중식": ["chinese", "dim sum"],
+            "아시안": ["vietnamese", "thai", "asian", "indian"],
+            "카페": ["coffee", "cafe", "cake", "bakery"]
+        }
+
         for element in data['elements']:
             if 'tags' in element and 'name' in element['tags']:
                 name = element['tags']['name']
+                raw_cuisine = element['tags'].get('cuisine', 'general').lower()
+                
+                # 카테고리 필터링 로직
+                detected_type = "기타"
+                if category == 'restaurant':
+                    is_match = False
+                    if cuisine_filter and "전체" not in cuisine_filter:
+                        for user_select in cuisine_filter:
+                            if user_select in cuisine_map:
+                                if any(c in raw_cuisine for c in cuisine_map[user_select]):
+                                    is_match = True
+                                    detected_type = user_select
+                                    break
+                            elif user_select == "기타": # 매핑 안된 것들
+                                is_match = True 
+                        if not is_match: continue
+                    else:
+                        # 전체 선택 시 자동 분류 표시용
+                        for k, v in cuisine_map.items():
+                            if any(c in raw_cuisine for c in v):
+                                detected_type = k
+                                break
+
                 search_query = f"{name} Berlin".replace(" ", "+")
                 link = f"https://www.google.com/search?q={search_query}"
                 
                 desc = "장소"
-                if category == 'restaurant': 
-                    cuisine = element['tags'].get('cuisine', '일반')
-                    desc = f"맛집 ({cuisine})"
+                if category == 'restaurant': desc = f"음식점 ({detected_type})"
                 elif category == 'hotel': desc = "숙박시설"
                 elif category == 'tourism': desc = "관광명소"
 
@@ -156,7 +168,7 @@ def search_location(query):
     return None, None, None
 
 def get_gemini_response(prompt):
-    if not GEMINI_API_KEY: return "API 키 확인 필요"
+    if not GEMINI_API_KEY: return "API 키가 필요합니다."
     try:
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
@@ -164,13 +176,13 @@ def get_gemini_response(prompt):
     except: return "AI 서비스 오류"
 
 # ---------------------------------------------------------
-# 3. 여행 코스 데이터
+# 3. 데이터 정의 (여행 코스)
 # ---------------------------------------------------------
 courses = {
     "🌳 Theme 1: 숲과 힐링": [
         {"name": "1. 전승기념탑", "lat": 52.5145, "lng": 13.3501, "desc": "베를린 전경이 한눈에 보이는 황금 천사상"},
         {"name": "2. 티어가르텐 산책", "lat": 52.5135, "lng": 13.3575, "desc": "도심 속 거대한 허파"},
-        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든"},
+        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든 (피자/맥주)"},
         {"name": "4. 베를린 동물원", "lat": 52.5079, "lng": 13.3377, "desc": "세계 최대 종을 보유한 동물원"},
         {"name": "5. 카이저 빌헬름 교회", "lat": 52.5048, "lng": 13.3350, "desc": "전쟁의 상처를 간직한 교회"}
     ],
@@ -212,10 +224,10 @@ courses = {
 }
 
 # ---------------------------------------------------------
-# 4. 메인 화면 구성
+# 4. UI 및 메인 로직
 # ---------------------------------------------------------
 st.title("🇩🇪 베를린 통합 여행 가이드")
-st.caption("2023년 데이터 기반 안전 여행 & 추천 코스")
+st.caption("2023년 데이터 기반 안전 여행 & 맞춤 코스")
 
 # 세션 초기화
 if 'reviews' not in st.session_state: st.session_state['reviews'] = {}
@@ -224,18 +236,18 @@ if 'messages' not in st.session_state: st.session_state['messages'] = []
 if 'map_center' not in st.session_state: st.session_state['map_center'] = [52.5200, 13.4050]
 if 'search_marker' not in st.session_state: st.session_state['search_marker'] = None
 
-# 상단 정보 (환율/날씨)
-col1, col2 = st.columns(2)
-with col1:
+# 상단: 환율 & 날씨
+c1, c2 = st.columns(2)
+with c1:
     rate = get_exchange_rate()
     st.metric("💶 유로 환율", f"{rate:.0f}원", delta="1 EUR 기준")
-with col2:
+with c2:
     w = get_weather()
     st.metric("⛅ 베를린 날씨", f"{w['temperature']}°C")
 
 st.divider()
 
-# --- 사이드바 설정 ---
+# --- 사이드바 ---
 st.sidebar.title("🛠️ 여행 도구")
 
 # 검색
@@ -250,55 +262,50 @@ if search_query:
 
 st.sidebar.divider()
 
-# ★★★ 핵심: 레이어 필터 ★★★
-st.sidebar.subheader("👀 지도 필터")
-show_crime = st.sidebar.checkbox("🚨 범죄 위험도 (지역별 색상)", value=True)
-st.sidebar.caption("켜면 범죄 빈도에 따라 지역 색상이 변합니다.")
+# ★ 지도 필터 (공통 적용)
+st.sidebar.subheader("👀 지도 표시 설정")
+show_crime = st.sidebar.checkbox("🚨 범죄 위험도 (Choropleth)", value=True)
 st.sidebar.write("---")
 show_food = st.sidebar.checkbox("🍽️ 주변 맛집", value=True)
 show_hotel = st.sidebar.checkbox("🏨 숙박시설", value=False)
 show_tour = st.sidebar.checkbox("📸 관광명소", value=False)
 
+# ★ 음식점 유형 필터 (Tab 1용)
+st.sidebar.write("---")
+st.sidebar.markdown("**🥘 음식점 유형 (자유탐험 탭)**")
+cuisine_options = ["전체", "한식", "양식", "일식", "중식", "아시안", "카페", "기타"]
+selected_cuisines = st.sidebar.multiselect("원하는 종류 선택", cuisine_options, default=["전체"])
+
 # 탭 구성
 tab1, tab2, tab3, tab4 = st.tabs(["🗺️ 통합 지도", "🚩 추천 코스", "💬 커뮤니티/AI", "📊 범죄 분석"])
 
 # =========================================================
-# TAB 1: 통합 지도 (범죄 + POI)
+# TAB 1: 통합 지도 (범죄 + 유형별 맛집)
 # =========================================================
 with tab1:
     center = st.session_state['map_center']
-    m = folium.Map(location=center, zoom_start=13)
+    m = folium.Map(location=center, zoom_start=14)
 
-    # 1. 범죄 데이터 레이어 (엑셀 읽기)
+    # 1. 범죄 데이터 레이어
     if show_crime:
-        crime_df = load_crime_data(CRIME_FILE_NAME)
-        
+        crime_df = load_crime_data_excel(CRIME_FILE_NAME)
         if not crime_df.empty:
             geo_url = "https://raw.githubusercontent.com/funkeinteraktiv/Berlin-Geodaten/master/berlin_bezirke.geojson"
-            
             folium.Choropleth(
-                geo_data=geo_url,
-                name="범죄 위험도",
-                data=crime_df,
-                columns=["District", "Total_Crime"],
-                key_on="feature.properties.name",
-                fill_color="YlOrRd",
-                fill_opacity=0.5,
-                line_opacity=0.2,
+                geo_data=geo_url, name="범죄 위험도", data=crime_df,
+                columns=["District", "Total_Crime"], key_on="feature.properties.name",
+                fill_color="YlOrRd", fill_opacity=0.5, line_opacity=0.2,
                 legend_name="2023년 총 범죄 발생 수"
             ).add_to(m)
-        else:
-            st.error(f"엑셀 파일({CRIME_FILE_NAME})을 읽을 수 없습니다.")
 
     # 2. 검색 핀
     if st.session_state['search_marker']:
         sm = st.session_state['search_marker']
         folium.Marker([sm['lat'], sm['lng']], popup=sm['name'], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
 
-    # 3. 장소 마커 (OSM - 아이콘/팝업 디자인 유지)
-    # 맛집
+    # 3. 장소 마커 (아이콘 적용)
     if show_food:
-        places = get_osm_places('restaurant', center[0], center[1])
+        places = get_osm_places('restaurant', center[0], center[1], 3000, selected_cuisines)
         fg_food = folium.FeatureGroup(name="맛집")
         for p in places:
             html = f"<div style='width:150px'><b>{p['name']}</b><br><span style='color:grey'>{p['desc']}</span><br><a href='{p['link']}' target='_blank'>구글 검색</a></div>"
@@ -308,7 +315,6 @@ with tab1:
             ).add_to(fg_food)
         fg_food.add_to(m)
 
-    # 호텔
     if show_hotel:
         places = get_osm_places('hotel', center[0], center[1])
         fg_hotel = folium.FeatureGroup(name="호텔")
@@ -320,7 +326,6 @@ with tab1:
             ).add_to(fg_hotel)
         fg_hotel.add_to(m)
 
-    # 관광지
     if show_tour:
         places = get_osm_places('tourism', center[0], center[1])
         fg_tour = folium.FeatureGroup(name="관광")
@@ -335,22 +340,36 @@ with tab1:
     st_folium(m, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스
+# TAB 2: 추천 코스 (클릭 가능, 펼침, 지도 크게)
 # =========================================================
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
+    
+    # 코스 선택 (가로형 Radio)
     themes = list(courses.keys())
-    selected_theme = st.selectbox("테마를 선택하세요", themes)
+    selected_theme = st.radio("테마를 선택하세요:", themes, horizontal=True)
     course_data = courses[selected_theme]
     
-    c_col1, c_col2 = st.columns([2, 1])
+    c_col1, c_col2 = st.columns([1.5, 1])
+    
     with c_col1:
+        # 코스 지도 (크게) - 여기도 범죄 필터 적용
         m2 = folium.Map(location=[course_data[2]['lat'], course_data[2]['lng']], zoom_start=13)
+        
+        # 범죄 레이어 추가 (선택 시)
+        if show_crime:
+            crime_df = load_crime_data_excel(CRIME_FILE_NAME)
+            if not crime_df.empty:
+                folium.Choropleth(
+                    geo_data="https://raw.githubusercontent.com/funkeinteraktiv/Berlin-Geodaten/master/berlin_bezirke.geojson",
+                    data=crime_df, columns=["District", "Total_Crime"], key_on="feature.properties.name",
+                    fill_color="YlOrRd", fill_opacity=0.4, line_opacity=0.2, name="범죄"
+                ).add_to(m2)
+
         points = []
         for i, item in enumerate(course_data):
             loc = [item['lat'], item['lng']]
             points.append(loc)
-            
             icon_name = 'cutlery' if '맛집' in item.get('desc', '') or '음식' in item.get('desc', '') else 'camera'
             icon_color = 'orange' if icon_name == 'cutlery' else 'blue'
             
@@ -360,111 +379,131 @@ with tab2:
             ).add_to(m2)
         
         folium.PolyLine(points, color="red", weight=4, opacity=0.7).add_to(m2)
-        st_folium(m2, height=400)
+        st_folium(m2, height=700) # 지도 높이 증가
         
     with c_col2:
-        st.markdown(f"### {selected_theme}")
+        st.markdown(f"### {selected_theme} 상세 정보")
+        # Expander 대신 바로 보여주기
         for idx, spot in enumerate(course_data):
-            with st.expander(f"{idx+1}. {spot['name']}"):
-                st.write(spot['desc'])
-                q = spot['name'].replace(" ", "+") + "+Berlin"
-                st.markdown(f"[🔍 구글 검색](https://www.google.com/search?q={q})")
+            st.markdown(f"**{idx+1}. {spot['name']}**")
+            st.caption(spot['desc'])
+            q = spot['name'].replace(" ", "+") + "+Berlin"
+            st.markdown(f"[👉 구글 검색](https://www.google.com/search?q={q})")
+            st.write("---")
 
 # =========================================================
-# TAB 3: 커뮤니티 & AI
+# TAB 3: 커뮤니티 & AI (장소 후기 추가)
 # =========================================================
 with tab3:
-    c_chat, c_ai = st.columns([1, 1])
+    col_review, col_rec = st.columns(2)
     
-    # 추천/대댓글
-    with c_chat:
+    # 1. 장소별 후기 남기기
+    with col_review:
+        st.subheader("💬 장소별 후기")
+        # 코스에 있는 장소들 목록 추출
+        all_places = sorted(list(set([p['name'] for v in courses.values() for p in v])))
+        target_place = st.selectbox("어떤 장소에 다녀오셨나요?", ["선택하세요"] + all_places)
+        
+        if target_place != "선택하세요":
+            if target_place not in st.session_state['reviews']:
+                st.session_state['reviews'][target_place] = []
+                
+            with st.form(f"review_{target_place}"):
+                rv_text = st.text_area("후기를 남겨주세요")
+                if st.form_submit_button("후기 등록"):
+                    st.session_state['reviews'][target_place].append(rv_text)
+                    st.rerun()
+            
+            if st.session_state['reviews'][target_place]:
+                st.write("---")
+                for rv in st.session_state['reviews'][target_place]:
+                    st.info(rv)
+
+    # 2. 나만의 장소 추천
+    with col_rec:
         st.subheader("👍 나만의 장소 추천")
         with st.form("rec_form", clear_on_submit=True):
             name = st.text_input("장소 이름")
             reason = st.text_input("추천 이유")
-            if st.form_submit_button("등록"):
+            if st.form_submit_button("추천하기"):
                 st.session_state['recommendations'].insert(0, {"place": name, "desc": reason, "replies": []})
                 st.rerun()
-        st.write("---")
+        
         if st.session_state['recommendations']:
+            st.write("---")
             for i, rec in enumerate(st.session_state['recommendations']):
                 st.markdown(f"**📍 {rec['place']}**")
                 st.success(rec['desc'])
                 for reply in rec['replies']:
                     st.caption(f"↳ {reply}")
-                with st.expander("💬 댓글 달기"):
+                with st.expander("댓글 달기"):
                     reply_text = st.text_input("내용", key=f"re_{i}")
                     if st.button("등록", key=f"btn_{i}"):
                         rec['replies'].append(reply_text)
                         st.rerun()
                 st.divider()
-        else:
-            st.info("첫 번째 추천을 남겨보세요!")
 
-    # AI 챗봇
-    with c_ai:
-        st.subheader("🤖 Gemini 여행 비서")
-        chat_box = st.container(height=500)
-        for msg in st.session_state['messages']:
-            chat_box.chat_message(msg['role']).write(msg['content'])
-        if prompt := st.chat_input("질문하세요..."):
-            st.session_state['messages'].append({"role": "user", "content": prompt})
-            chat_box.chat_message("user").write(prompt)
-            with chat_box.chat_message("assistant"):
-                resp = get_gemini_response(prompt)
-                st.write(resp)
-            st.session_state['messages'].append({"role": "assistant", "content": resp})
+    # 3. AI 챗봇
+    st.divider()
+    st.subheader("🤖 Gemini 여행 비서")
+    chat_box = st.container(height=300)
+    for msg in st.session_state['messages']:
+        chat_box.chat_message(msg['role']).write(msg['content'])
+    if prompt := st.chat_input("질문하세요..."):
+        st.session_state['messages'].append({"role": "user", "content": prompt})
+        chat_box.chat_message("user").write(prompt)
+        with chat_box.chat_message("assistant"):
+            resp = get_gemini_response(prompt)
+            st.write(resp)
+        st.session_state['messages'].append({"role": "assistant", "content": resp})
 
 # =========================================================
 # TAB 4: 범죄 통계 분석 (Interactive)
 # =========================================================
 with tab4:
     st.header("📊 베를린 범죄 데이터 상세 분석")
-    st.caption(f"데이터 파일: {CRIME_FILE_NAME}")
     
-    df_stat = load_crime_data(CRIME_FILE_NAME)
+    df_stat = load_crime_data_excel(CRIME_FILE_NAME)
     
     if not df_stat.empty:
-        # 합계 계산
-        if 'Total_Crime' in df_stat.columns:
-            total_crime = df_stat['Total_Crime'].sum()
-            max_district = df_stat.loc[df_stat['Total_Crime'].idxmax()]['District']
+        total_crime = df_stat['Total_Crime'].sum()
+        max_district = df_stat.loc[df_stat['Total_Crime'].idxmax()]['District']
+        
+        k1, k2 = st.columns(2)
+        k1.metric("분석 대상 총 범죄 수", f"{int(total_crime):,}건")
+        k2.metric("최다 발생 구역", max_district)
+        
+        st.divider()
+        
+        # Interactive Plots
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.subheader("🏙️ 구별 범죄 Treemap")
+            # Treemap이 더 Interactive함
+            fig_tree = px.treemap(
+                df_stat, path=['District'], values='Total_Crime',
+                color='Total_Crime', color_continuous_scale='Reds',
+                title="구별 범죄 분포 (크기=범죄수)"
+            )
+            st.plotly_chart(fig_tree, use_container_width=True)
             
-            k1, k2 = st.columns(2)
-            k1.metric("분석 대상 총 범죄 수", f"{int(total_crime):,}건")
-            k2.metric("최다 발생 구역", max_district)
-            
-            st.divider()
-            
-            # 차트
-            col_chart1, col_chart2 = st.columns(2)
-            
-            with col_chart1:
-                st.subheader("🏙️ 구별 범죄 순위")
-                df_sorted = df_stat.sort_values('Total_Crime', ascending=True)
-                fig_bar = px.bar(
-                    df_sorted, x='Total_Crime', y='District', orientation='h',
-                    text='Total_Crime', title="지역별 범죄 발생 수",
-                    color='Total_Crime', color_continuous_scale='Reds'
+        with c2:
+            st.subheader("🥧 범죄 유형 분석")
+            crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
+            if crime_cols:
+                type_sums = df_stat[crime_cols].sum().sort_values(ascending=False).head(10)
+                fig_pie = px.pie(
+                    values=type_sums.values, names=type_sums.index,
+                    title="상위 10개 범죄 유형", hole=0.3
                 )
-                fig_bar.update_traces(texttemplate='%{text:.2s}', textposition='outside')
-                st.plotly_chart(fig_bar, use_container_width=True)
-                
-            with col_chart2:
-                st.subheader("🥧 범죄 유형 분석")
-                # 숫자형 컬럼 추출 (District 등 제외)
-                crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
-                if crime_cols:
-                    type_sums = df_stat[crime_cols].sum().sort_values(ascending=False).head(10)
-                    fig_pie = px.pie(
-                        values=type_sums.values, names=type_sums.index,
-                        title="상위 10개 범죄 유형", hole=0.4
-                    )
-                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                else:
-                    st.info("세부 범죄 유형 데이터를 찾을 수 없습니다.")
-        else:
-            st.warning("데이터는 읽었으나 총계 컬럼을 생성하지 못했습니다.")
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_pie, use_container_width=True)
+        
+        st.subheader("📈 지역별 범죄 분포 (Box Plot)")
+        # Box Plot for distribution
+        fig_box = px.box(df_stat, y='Total_Crime', points="all", title="구별 범죄 발생 수 분포")
+        st.plotly_chart(fig_box, use_container_width=True)
+
     else:
         st.warning("데이터를 분석할 수 없습니다. 엑셀 파일을 확인해주세요.")
