@@ -200,50 +200,50 @@ def get_gemini_response(prompt):
     except: return "AI 서비스 오류"
 
 # ---------------------------------------------------------
-# 3. 여행 코스 데이터 (type 정보 추가됨)
+# 3. 여행 코스 데이터
 # ---------------------------------------------------------
 courses = {
     "🌳 Theme 1: 숲과 힐링": [
-        {"name": "1. 전승기념탑", "lat": 52.5145, "lng": 13.3501, "type": "view", "desc": "베를린 전경이 한눈에 보이는 황금 천사상"},
-        {"name": "2. 티어가르텐 산책", "lat": 52.5135, "lng": 13.3575, "type": "walk", "desc": "도심 속 거대한 허파"},
-        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "type": "food", "desc": "호수 앞 비어가든 (피자/맥주)"},
-        {"name": "4. 베를린 동물원", "lat": 52.5079, "lng": 13.3377, "type": "view", "desc": "세계 최대 종을 보유한 동물원"},
-        {"name": "5. 카이저 빌헬름 교회", "lat": 52.5048, "lng": 13.3350, "type": "view", "desc": "전쟁의 상처를 간직한 교회"}
+        {"name": "1. 전승기념탑", "lat": 52.5145, "lng": 13.3501, "desc": "베를린 전경이 한눈에 보이는 황금 천사상"},
+        {"name": "2. 티어가르텐 산책", "lat": 52.5135, "lng": 13.3575, "desc": "도심 속 거대한 허파"},
+        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든 (피자/맥주)"},
+        {"name": "4. 베를린 동물원", "lat": 52.5079, "lng": 13.3377, "desc": "세계 최대 종을 보유한 동물원"},
+        {"name": "5. 카이저 빌헬름 교회", "lat": 52.5048, "lng": 13.3350, "desc": "전쟁의 상처를 간직한 교회"}
     ],
     "🎨 Theme 2: 예술과 고전": [
-        {"name": "1. 베를린 돔", "lat": 52.5190, "lng": 13.4010, "type": "view", "desc": "웅장한 돔 지붕"},
-        {"name": "2. 구 국립 미술관", "lat": 52.5208, "lng": 13.3982, "type": "view", "desc": "고전 예술의 정수"},
-        {"name": "3. Monsieur Vuong (맛집)", "lat": 52.5244, "lng": 13.4085, "type": "food", "desc": "유명 베트남 쌀국수 맛집"},
-        {"name": "4. Hackescher Hof", "lat": 52.5246, "lng": 13.4020, "type": "view", "desc": "아르누보 양식의 안뜰"},
-        {"name": "5. 제임스 사이먼 공원", "lat": 52.5213, "lng": 13.4005, "type": "walk", "desc": "강변 산책로"}
+        {"name": "1. 베를린 돔", "lat": 52.5190, "lng": 13.4010, "desc": "웅장한 돔 지붕"},
+        {"name": "2. 구 국립 미술관", "lat": 52.5208, "lng": 13.3982, "desc": "고전 예술의 정수"},
+        {"name": "3. Monsieur Vuong (맛집)", "lat": 52.5244, "lng": 13.4085, "desc": "유명 베트남 쌀국수 맛집"},
+        {"name": "4. Hackescher Hof", "lat": 52.5246, "lng": 13.4020, "desc": "아르누보 양식의 안뜰"},
+        {"name": "5. 제임스 사이먼 공원", "lat": 52.5213, "lng": 13.4005, "desc": "강변 산책로"}
     ],
     "🏰 Theme 3: 분단의 역사": [
-        {"name": "1. 베를린 장벽 기념관", "lat": 52.5352, "lng": 13.3903, "type": "view", "desc": "장벽의 실제 모습"},
-        {"name": "2. Mauerpark", "lat": 52.5404, "lng": 13.4048, "type": "walk", "desc": "주말 벼룩시장과 공원"},
-        {"name": "3. Prater Beer Garden", "lat": 52.5399, "lng": 13.4101, "type": "food", "desc": "가장 오래된 야외 맥주집"},
-        {"name": "4. 체크포인트 찰리", "lat": 52.5074, "lng": 13.3904, "type": "view", "desc": "분단 시절 검문소"},
-        {"name": "5. Topography of Terror", "lat": 52.5065, "lng": 13.3835, "type": "view", "desc": "나치 역사관"}
+        {"name": "1. 베를린 장벽 기념관", "lat": 52.5352, "lng": 13.3903, "desc": "장벽의 실제 모습"},
+        {"name": "2. Mauerpark", "lat": 52.5404, "lng": 13.4048, "desc": "주말 벼룩시장과 공원"},
+        {"name": "3. Prater Beer Garden", "lat": 52.5399, "lng": 13.4101, "desc": "가장 오래된 야외 맥주집"},
+        {"name": "4. 체크포인트 찰리", "lat": 52.5074, "lng": 13.3904, "desc": "분단 시절 검문소"},
+        {"name": "5. Topography of Terror", "lat": 52.5065, "lng": 13.3835, "desc": "나치 역사관"}
     ],
     "🕶️ Theme 4: 힙스터 성지": [
-        {"name": "1. 이스트 사이드 갤러리", "lat": 52.5050, "lng": 13.4397, "type": "walk", "desc": "장벽 위 야외 갤러리"},
-        {"name": "2. 오버바움 다리", "lat": 52.5015, "lng": 13.4455, "type": "view", "desc": "붉은 벽돌 다리"},
-        {"name": "3. Burgermeister (맛집)", "lat": 52.5005, "lng": 13.4420, "type": "food", "desc": "다리 밑 힙한 버거집"},
-        {"name": "4. Voo Store", "lat": 52.5005, "lng": 13.4215, "type": "view", "desc": "패션 피플들의 숨겨진 편집샵"},
-        {"name": "5. Landwehr Canal", "lat": 52.4960, "lng": 13.4150, "type": "walk", "desc": "운하 산책"}
+        {"name": "1. 이스트 사이드 갤러리", "lat": 52.5050, "lng": 13.4397, "desc": "장벽 위 야외 갤러리"},
+        {"name": "2. 오버바움 다리", "lat": 52.5015, "lng": 13.4455, "desc": "붉은 벽돌 다리"},
+        {"name": "3. Burgermeister (맛집)", "lat": 52.5005, "lng": 13.4420, "desc": "다리 밑 힙한 버거집"},
+        {"name": "4. Voo Store", "lat": 52.5005, "lng": 13.4215, "desc": "패션 피플들의 숨겨진 편집샵"},
+        {"name": "5. Landwehr Canal", "lat": 52.4960, "lng": 13.4150, "desc": "운하 산책"}
     ],
     "🛍️ Theme 5: 럭셔리 & 쇼핑": [
-        {"name": "1. KaDeWe 백화점", "lat": 52.5015, "lng": 13.3414, "type": "view", "desc": "유럽 최대 백화점"},
-        {"name": "2. 쿠담 거리", "lat": 52.5028, "lng": 13.3323, "type": "walk", "desc": "베를린의 샹젤리제 명품 거리"},
-        {"name": "3. Schwarzes Café", "lat": 52.5060, "lng": 13.3250, "type": "food", "desc": "24시간 영업하는 예술가들의 아지트"},
-        {"name": "4. C/O Berlin", "lat": 52.5065, "lng": 13.3325, "type": "view", "desc": "사진 예술 전문 미술관"},
-        {"name": "5. Savignyplatz", "lat": 52.5060, "lng": 13.3220, "type": "walk", "desc": "고풍스러운 서점과 카페 광장"}
+        {"name": "1. KaDeWe 백화점", "lat": 52.5015, "lng": 13.3414, "desc": "유럽 최대 백화점"},
+        {"name": "2. 쿠담 거리", "lat": 52.5028, "lng": 13.3323, "desc": "베를린의 샹젤리제 명품 거리"},
+        {"name": "3. Schwarzes Café", "lat": 52.5060, "lng": 13.3250, "desc": "24시간 영업하는 예술가들의 아지트"},
+        {"name": "4. C/O Berlin", "lat": 52.5065, "lng": 13.3325, "desc": "사진 예술 전문 미술관"},
+        {"name": "5. Savignyplatz", "lat": 52.5060, "lng": 13.3220, "desc": "고풍스러운 서점과 카페 광장"}
     ],
     "🌙 Theme 6: 화려한 밤": [
-        {"name": "1. TV타워", "lat": 52.5208, "lng": 13.4094, "type": "view", "desc": "야경 감상"},
-        {"name": "2. 로젠탈러 거리", "lat": 52.5270, "lng": 13.4020, "type": "walk", "desc": "트렌디한 골목"},
-        {"name": "3. Clärchens Ballhaus", "lat": 52.5265, "lng": 13.3965, "type": "food", "desc": "무도회장 분위기 식사"},
-        {"name": "4. Friedrichstadt-Palast", "lat": 52.5235, "lng": 13.3885, "type": "view", "desc": "화려한 쇼 관람"},
-        {"name": "5. 브란덴부르크 문", "lat": 52.5163, "lng": 13.3777, "type": "walk", "desc": "밤 조명이 켜진 랜드마크"}
+        {"name": "1. TV타워", "lat": 52.5208, "lng": 13.4094, "desc": "야경 감상"},
+        {"name": "2. 로젠탈러 거리", "lat": 52.5270, "lng": 13.4020, "desc": "트렌디한 골목"},
+        {"name": "3. Clärchens Ballhaus", "lat": 52.5265, "lng": 13.3965, "desc": "무도회장 분위기 식사"},
+        {"name": "4. Friedrichstadt-Palast", "lat": 52.5235, "lng": 13.3885, "desc": "화려한 쇼 관람"},
+        {"name": "5. 브란덴부르크 문", "lat": 52.5163, "lng": 13.3777, "desc": "밤 조명이 켜진 랜드마크"}
     ]
 }
 
@@ -350,7 +350,7 @@ with tab1:
     st_folium(m, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스 (아이콘 완벽 수정)
+# TAB 2: 추천 코스 (높이 고정으로 레이아웃 문제 해결)
 # =========================================================
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
@@ -361,9 +361,12 @@ with tab2:
     show_crime_course = st.checkbox("🚨 이 지도에도 범죄 위험도 표시", value=False)
 
     c_col1, c_col2 = st.columns([2, 1])
+    
+    # ★ 높이 변수 설정 (800px)
     FIXED_HEIGHT = 800
 
     with c_col1:
+        # 지도 (높이 고정)
         m2 = folium.Map(location=[course_data[2]['lat'], course_data[2]['lng']], zoom_start=13)
         if show_crime_course:
             crime_df = load_crime_data_excel(CRIME_FILE_NAME)
@@ -378,21 +381,15 @@ with tab2:
         for i, item in enumerate(course_data):
             loc = [item['lat'], item['lng']]
             points.append(loc)
-            
-            # 아이콘 결정 로직 (명확하게 구분)
-            if item.get('type') == 'food':
-                icon_name = 'cutlery'
-                icon_color = 'orange'
-            else:
-                icon_name = 'camera'
-                icon_color = 'blue'
-            
+            icon_name = 'cutlery' if '맛집' in item.get('desc', '') or '음식' in item.get('desc', '') else 'camera'
+            icon_color = 'orange' if icon_name == 'cutlery' else 'blue'
             folium.Marker(loc, tooltip=f"{i+1}. {item['name']}", icon=folium.Icon(color=icon_color, icon=icon_name, prefix='fa')).add_to(m2)
         
         folium.PolyLine(points, color="red", weight=4, opacity=0.7).add_to(m2)
         st_folium(m2, height=FIXED_HEIGHT, use_container_width=True)
         
     with c_col2:
+        # ★ 텍스트 영역도 동일 높이 컨테이너로 감싸서 딱 맞춤
         with st.container(height=FIXED_HEIGHT):
             st.markdown(f"### 🚶 {selected_theme}")
             st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
@@ -474,12 +471,10 @@ with tab4:
         selected_district = st.selectbox("지역 선택", districts_list)
         
         df_d = df_stat[df_stat['District'] == selected_district]
-        # 숫자 컬럼만 필터링 (Total_Crime 및 기타 제외)
-        crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)', '총범죄']]
+        crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
         
         if crime_cols:
             d_counts = df_d[crime_cols].sum().sort_values(ascending=False).head(5)
-            # 한글 변환 적용
             d_counts.index = [trans_map.get(idx, idx) for idx in d_counts.index]
             
             fig = px.bar(x=d_counts.values, y=d_counts.index, orientation='h', 
@@ -497,9 +492,7 @@ with tab4:
         with c2:
             st.subheader("🥧 전체 범죄 유형")
             all_sums = df_stat[crime_cols].sum().sort_values(ascending=False).head(10)
-            # 한글 변환 적용
             all_sums.index = [trans_map.get(idx, idx) for idx in all_sums.index]
-            
             fig_pie = px.pie(values=all_sums.values, names=all_sums.index, hole=0.3)
             st.plotly_chart(fig_pie, use_container_width=True)
     else:
