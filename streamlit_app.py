@@ -8,19 +8,18 @@ import googlemaps
 import plotly.express as px
 
 # ---------------------------------------------------------
-# 🚨 파일 이름 (GitHub에 업로드할 엑셀 파일명)
+# 🚨 파일 이름 설정 (GitHub에 올린 파일명)
 # ---------------------------------------------------------
-CRIME_FILE_NAME = "2023_berlin_crime.xlsx" 
+CRIME_FILE_NAME = "2023_berlin_crime.xlsx"
 
 # ---------------------------------------------------------
-# 1. 설정 및 API 키 로드
+# 1. 설정 및 API 키
 # ---------------------------------------------------------
 st.set_page_config(layout="wide", page_title="베를린 통합 가이드")
 
 GMAPS_API_KEY = st.secrets.get("google_maps_api_key", "")
 GEMINI_API_KEY = st.secrets.get("gemini_api_key", "")
 
-# 클라이언트 초기화
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
@@ -28,7 +27,7 @@ if GEMINI_API_KEY:
         pass
 
 # ---------------------------------------------------------
-# 2. 데이터 처리 함수 (엑셀 로드)
+# 2. 데이터 처리 함수 (엑셀/CSV 자동 감지)
 # ---------------------------------------------------------
 @st.cache_data
 def get_exchange_rate():
@@ -49,14 +48,22 @@ def get_weather():
         return {"temperature": 15.0, "weathercode": 0}
 
 @st.cache_data
-def load_crime_data_excel(file_name):
+def load_crime_data(file_name):
     """
-    엑셀 파일을 읽어서 지도/통계용 데이터프레임으로 변환합니다.
+    엑셀(.xlsx) 또는 CSV 파일을 읽어서 지도용 데이터로 변환합니다.
     """
+    df = pd.DataFrame()
     try:
-        # 1. 엑셀 읽기 (앞 4줄 건너뛰기, openpyxl 엔진 사용)
+        # 1. 엑셀로 읽기 시도
         df = pd.read_excel(file_name, skiprows=4, engine='openpyxl')
+    except:
+        try:
+            # 엑셀이 아니면 CSV로 읽기 시도 (혹시 몰라서)
+            df = pd.read_csv(file_name, skiprows=4, encoding='utf-8', on_bad_lines='skip')
+        except:
+            return pd.DataFrame()
 
+    try:
         # 2. 컬럼명 정리 (\n 제거)
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
 
@@ -78,14 +85,12 @@ def load_crime_data_excel(file_name):
         ]
         df = df[df[district_col].isin(berlin_districts)].copy()
 
-        # 5. 숫자 데이터 정제 (문자 -> 숫자)
-        # 총계 컬럼 처리
+        # 5. 숫자 데이터 정제
         if total_col:
             df[total_col] = df[total_col].astype(str).str.replace('.', '', regex=False)
             df['Total_Crime'] = pd.to_numeric(df[total_col], errors='coerce').fillna(0)
         
-        # 나머지 숫자형 컬럼들도 정제 (통계 분석용)
-        # 문자열 컬럼 제외하고 나머지 모두 처리
+        # 통계용 숫자 컬럼 정제
         cols_to_clean = [c for c in df.columns if c not in [district_col, 'LOR-Schlüssel (Bezirksregion)', 'Total_Crime']]
         for c in cols_to_clean:
             df[c] = df[c].astype(str).str.replace('.', '', regex=False)
@@ -96,7 +101,7 @@ def load_crime_data_excel(file_name):
         
         return df
 
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data
@@ -165,7 +170,7 @@ courses = {
     "🌳 Theme 1: 숲과 힐링": [
         {"name": "1. 전승기념탑", "lat": 52.5145, "lng": 13.3501, "desc": "베를린 전경이 한눈에 보이는 황금 천사상"},
         {"name": "2. 티어가르텐 산책", "lat": 52.5135, "lng": 13.3575, "desc": "도심 속 거대한 허파"},
-        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든 (피자/맥주)"},
+        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든"},
         {"name": "4. 베를린 동물원", "lat": 52.5079, "lng": 13.3377, "desc": "세계 최대 종을 보유한 동물원"},
         {"name": "5. 카이저 빌헬름 교회", "lat": 52.5048, "lng": 13.3350, "desc": "전쟁의 상처를 간직한 교회"}
     ],
@@ -210,7 +215,7 @@ courses = {
 # 4. 메인 화면 구성
 # ---------------------------------------------------------
 st.title("🇩🇪 베를린 통합 여행 가이드")
-st.caption("2023년 데이터(Excel) 기반 안전 여행 & 추천 코스")
+st.caption("2023년 데이터 기반 안전 여행 & 추천 코스")
 
 # 세션 초기화
 if 'reviews' not in st.session_state: st.session_state['reviews'] = {}
@@ -231,7 +236,7 @@ with col2:
 st.divider()
 
 # --- 사이드바 설정 ---
-st.sidebar.title("🛠️ 지도 필터 & 설정")
+st.sidebar.title("🛠️ 여행 도구")
 
 # 검색
 st.sidebar.subheader("📍 장소 이동")
@@ -246,9 +251,9 @@ if search_query:
 st.sidebar.divider()
 
 # ★★★ 핵심: 레이어 필터 ★★★
-st.sidebar.subheader("👀 지도에 표시할 정보")
-show_crime = st.sidebar.checkbox("🚨 범죄 위험도 (구역별 색상)", value=True)
-st.sidebar.caption("범죄 발생이 많을수록 지도 구역이 빨간색으로 변합니다.")
+st.sidebar.subheader("👀 지도 필터")
+show_crime = st.sidebar.checkbox("🚨 범죄 위험도 (지역별 색상)", value=True)
+st.sidebar.caption("켜면 범죄 빈도에 따라 지역 색상이 변합니다.")
 st.sidebar.write("---")
 show_food = st.sidebar.checkbox("🍽️ 주변 맛집", value=True)
 show_hotel = st.sidebar.checkbox("🏨 숙박시설", value=False)
@@ -264,12 +269,11 @@ with tab1:
     center = st.session_state['map_center']
     m = folium.Map(location=center, zoom_start=13)
 
-    # 1. 범죄 데이터 레이어 (Choropleth Map)
+    # 1. 범죄 데이터 레이어 (엑셀 읽기)
     if show_crime:
-        crime_df = load_crime_data_excel(CRIME_FILE_NAME)
+        crime_df = load_crime_data(CRIME_FILE_NAME)
         
         if not crime_df.empty:
-            # GeoJSON URL (베를린 구 경계 - 인터넷에서 자동 로드)
             geo_url = "https://raw.githubusercontent.com/funkeinteraktiv/Berlin-Geodaten/master/berlin_bezirke.geojson"
             
             folium.Choropleth(
@@ -277,21 +281,21 @@ with tab1:
                 name="범죄 위험도",
                 data=crime_df,
                 columns=["District", "Total_Crime"],
-                key_on="feature.properties.name", # GeoJSON의 구 이름 속성과 매칭
-                fill_color="YlOrRd", # 노랑 -> 주황 -> 빨강
+                key_on="feature.properties.name",
+                fill_color="YlOrRd",
                 fill_opacity=0.5,
                 line_opacity=0.2,
                 legend_name="2023년 총 범죄 발생 수"
             ).add_to(m)
         else:
-            st.error(f"범죄 데이터({CRIME_FILE_NAME})를 읽을 수 없습니다. 파일명을 확인하세요.")
+            st.error(f"엑셀 파일({CRIME_FILE_NAME})을 읽을 수 없습니다.")
 
-    # 2. 검색 마커
+    # 2. 검색 핀
     if st.session_state['search_marker']:
         sm = st.session_state['search_marker']
         folium.Marker([sm['lat'], sm['lng']], popup=sm['name'], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
 
-    # 3. 장소 마커 (OSM)
+    # 3. 장소 마커 (OSM - 아이콘/팝업 디자인 유지)
     # 맛집
     if show_food:
         places = get_osm_places('restaurant', center[0], center[1])
@@ -328,7 +332,6 @@ with tab1:
             ).add_to(fg_tour)
         fg_tour.add_to(m)
 
-    # 지도 출력
     st_folium(m, width="100%", height=600)
 
 # =========================================================
@@ -419,7 +422,7 @@ with tab4:
     st.header("📊 베를린 범죄 데이터 상세 분석")
     st.caption(f"데이터 파일: {CRIME_FILE_NAME}")
     
-    df_stat = load_crime_data_excel(CRIME_FILE_NAME)
+    df_stat = load_crime_data(CRIME_FILE_NAME)
     
     if not df_stat.empty:
         # 합계 계산
