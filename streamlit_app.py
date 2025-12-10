@@ -30,10 +30,10 @@ if GEMINI_API_KEY:
         pass
 
 # ---------------------------------------------------------
-# 2. 데이터 처리 함수
+# 2. 데이터 처리 함수 (번역 포함)
 # ---------------------------------------------------------
 
-# [환율]
+# [환율] 1달치 데이터 + 시각화 고정
 @st.cache_data
 def get_exchange_rate_chart():
     try:
@@ -51,10 +51,10 @@ def get_exchange_rate_chart():
     except:
         return 1450.0, None
 
-# [날씨]
+# [날씨] 상태 코드 해석
 def get_weather_desc(code):
     if code == 0: return "☀️ 맑음"
-    if code in [1, 2, 3]: return "🌥️ 구름/흐림"
+    if code in [1, 2, 3]: return "🌥️ 구름 조금/흐림"
     if code in [45, 48]: return "🌫️ 안개"
     if code in [51, 53, 55, 61, 63, 65]: return "🌧️ 비"
     if code in [71, 73, 75, 77]: return "❄️ 눈"
@@ -80,21 +80,52 @@ def get_weather_forecast():
     except:
         return 15.0, "정보 없음", pd.DataFrame()
 
-# [범죄 데이터]
+# ★ 범죄명 한국어 변환 맵핑 (컬럼명 교체용) ★
+CRIME_NAME_MAPPING = {
+    'Straftaten \n-insgesamt-': '총범죄',
+    'Straftaten -insgesamt-': '총범죄',
+    'Raub': '강도',
+    'Straßenraub,\nHandtaschen-raub': '소매치기',
+    'Körper-verletzungen \n-insgesamt-': '상해(전체)',
+    'Gefährl. und schwere Körper-verletzung': '중상해',
+    'Freiheits-beraubung, Nötigung,\nBedrohung, Nachstellung': '협박/스토킹',
+    'Diebstahl \n-insgesamt-': '절도(전체)',
+    'Diebstahl von Kraftwagen': '차량절도',
+    'Diebstahl \nan/aus Kfz': '차량털이',
+    'Fahrrad-\ndiebstahl': '자전거절도',
+    'Wohnraum-\neinbruch': '빈집털이',
+    'Branddelikte \n-insgesamt-': '화재범죄',
+    'Brand-\nstiftung': '방화',
+    'Sach-beschädigung -insgesamt-': '기물파손',
+    'Sach-beschädigung durch Graffiti': '그래피티',
+    'Rauschgift-delikte': '마약범죄',
+    'Kieztaten': '기타 지역범죄'
+}
+
 @st.cache_data
 def load_crime_data_excel(file_name):
     try:
         df = pd.read_excel(file_name, skiprows=4, engine='openpyxl')
-        df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
         
+        # 1. 컬럼명 1차 정리 (줄바꿈 제거)
+        # 하지만 매핑을 위해 원본 컬럼명을 유지하면서 매핑 딕셔너리 키와 비교
+        # 여기서는 매핑 딕셔너리가 줄바꿈 포함된 키를 가지고 있으므로 바로 rename 시도
+        
+        # 2. 컬럼명 한국어로 변경 (Rename)
+        # 딕셔너리에 없는 컬럼은 그대로 유지됨
+        df = df.rename(columns=CRIME_NAME_MAPPING)
+        
+        # 줄바꿈 제거 (매핑 안 된 나머지 컬럼들 정리)
+        df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
+
+        # 3. 구 이름 컬럼 찾기 ('Bezeichnung' 포함된 것)
         district_col = None
-        total_col = None
         for c in df.columns:
-            if 'Bezeichnung' in c: district_col = c
-            if 'Straftaten' in c and 'insgesamt' in c: total_col = c
+            if 'Bezeichnung' in c: district_col = c; break
         
         if not district_col: return pd.DataFrame()
 
+        # 4. 베를린 12개 구 필터링
         berlin_districts = [
             "Mitte", "Friedrichshain-Kreuzberg", "Pankow", "Charlottenburg-Wilmersdorf", 
             "Spandau", "Steglitz-Zehlendorf", "Tempelhof-Schöneberg", "Neukölln", 
@@ -102,37 +133,28 @@ def load_crime_data_excel(file_name):
         ]
         df = df[df[district_col].isin(berlin_districts)].copy()
 
-        if total_col:
-            df[total_col] = df[total_col].astype(str).str.replace('.', '', regex=False)
-            df['Total_Crime'] = pd.to_numeric(df[total_col], errors='coerce').fillna(0)
+        # 5. 숫자 데이터 정제 (문자 -> 숫자)
+        # '총범죄' 컬럼 처리
+        if '총범죄' in df.columns:
+            df['총범죄'] = df['총범죄'].astype(str).str.replace('.', '', regex=False)
+            df['Total_Crime'] = pd.to_numeric(df['총범죄'], errors='coerce').fillna(0)
         
-        cols_to_clean = [c for c in df.columns if c != district_col and 'LOR' not in c]
+        # 나머지 숫자형 컬럼 정제
+        cols_to_clean = [c for c in df.columns if c not in [district_col, 'LOR-Schlüssel (Bezirksregion)', 'Total_Crime']]
         for c in cols_to_clean:
-            df[c] = df[c].astype(str).str.replace('.', '', regex=False)
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            try:
+                df[c] = df[c].astype(str).str.replace('.', '', regex=False)
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            except: pass
 
         df = df.rename(columns={district_col: 'District'})
         return df
-    except:
+    except Exception:
         return pd.DataFrame()
-
-def get_crime_translation_map():
-    return {
-        'Raub': '강도', 'Straßenraub, Handtaschen-raub': '소매치기',
-        'Körper-verletzungen -insgesamt-': '상해(전체)', 'Gefährl. und schwere Körper-verletzung': '중상해',
-        'Freiheits-beraubung, Nötigung, Bedrohung, Nachstellung': '협박/스토킹',
-        'Diebstahl -insgesamt-': '절도(전체)', 'Diebstahl von Kraftwagen': '차량절도',
-        'Diebstahl an/aus Kfz': '차량털이', 'Fahrrad-diebstahl': '자전거절도',
-        'Wohnraum-einbruch': '빈집털이', 'Branddelikte -insgesamt-': '화재범죄',
-        'Brand-stiftung': '방화', 'Sach-beschädigung -insgesamt-': '기물파손',
-        'Sach-beschädigung durch Graffiti': '그래피티', 'Rauschgift-delikte': '마약범죄',
-        'Straftaten -insgesamt-': '총범죄', 'Kieztaten': '기타 지역범죄'
-    }
 
 @st.cache_data
 def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
     overpass_url = "http://overpass-api.de/api/interpreter"
-    
     if category == 'restaurant': tag = '["amenity"="restaurant"]'
     elif category == 'hotel': tag = '["tourism"~"hotel|hostel|guest_house"]' 
     elif category == 'tourism': tag = '["tourism"~"attraction|museum|artwork|viewpoint"]'
@@ -143,13 +165,11 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
         response = requests.get(overpass_url, params={'data': query})
         data = response.json()
         results = []
-        
         cuisine_map = {
             "한식": ["korean"], "양식": ["italian","french","german","american","burger","pizza","steak"],
             "일식": ["japanese","sushi","ramen"], "중식": ["chinese","dim sum"],
             "아시안": ["vietnamese","thai","asian","indian"], "카페": ["coffee","cafe","cake","bakery"]
         }
-
         for element in data['elements']:
             if 'tags' in element:
                 name = element['tags'].get('name', '이름 없음')
@@ -350,7 +370,7 @@ with tab1:
     st_folium(m, width="100%", height=600)
 
 # =========================================================
-# TAB 2: 추천 코스 (높이 고정으로 레이아웃 문제 해결)
+# TAB 2: 추천 코스
 # =========================================================
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
@@ -362,11 +382,7 @@ with tab2:
 
     c_col1, c_col2 = st.columns([2, 1])
     
-    # ★ 높이 변수 설정 (800px)
-    FIXED_HEIGHT = 800
-
     with c_col1:
-        # 지도 (높이 고정)
         m2 = folium.Map(location=[course_data[2]['lat'], course_data[2]['lng']], zoom_start=13)
         if show_crime_course:
             crime_df = load_crime_data_excel(CRIME_FILE_NAME)
@@ -386,18 +402,16 @@ with tab2:
             folium.Marker(loc, tooltip=f"{i+1}. {item['name']}", icon=folium.Icon(color=icon_color, icon=icon_name, prefix='fa')).add_to(m2)
         
         folium.PolyLine(points, color="red", weight=4, opacity=0.7).add_to(m2)
-        st_folium(m2, height=FIXED_HEIGHT, use_container_width=True)
+        st_folium(m2, height=600, use_container_width=True)
         
     with c_col2:
-        # ★ 텍스트 영역도 동일 높이 컨테이너로 감싸서 딱 맞춤
-        with st.container(height=FIXED_HEIGHT):
-            st.markdown(f"### 🚶 {selected_theme}")
-            st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
-            for idx, spot in enumerate(course_data):
-                st.info(f"**{idx+1}. {spot['name']}**\n\n{spot['desc']}")
-                q = spot['name'].replace(" ", "+") + "+Berlin"
-                st.markdown(f"[👉 구글 검색 바로가기](https://www.google.com/search?q={q})")
-                st.write("")
+        st.markdown(f"### 🚶 {selected_theme}")
+        st.markdown('<style>div.row-widget.stRadio > div{flex-direction:row;}</style>', unsafe_allow_html=True)
+        for idx, spot in enumerate(course_data):
+            st.info(f"**{idx+1}. {spot['name']}**\n\n{spot['desc']}")
+            q = spot['name'].replace(" ", "+") + "+Berlin"
+            st.markdown(f"[👉 구글 검색 바로가기](https://www.google.com/search?q={q})")
+            st.write("")
 
 # =========================================================
 # TAB 3: 커뮤니티 & AI
@@ -456,7 +470,6 @@ with tab4:
     st.header("📊 베를린 범죄 데이터 분석 (한국어)")
     
     df_stat = load_crime_data_excel(CRIME_FILE_NAME)
-    trans_map = get_crime_translation_map()
     
     if not df_stat.empty:
         total_crime = df_stat['Total_Crime'].sum()
@@ -471,11 +484,11 @@ with tab4:
         selected_district = st.selectbox("지역 선택", districts_list)
         
         df_d = df_stat[df_stat['District'] == selected_district]
-        crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
+        # 숫자 컬럼만 필터링 (Total_Crime 및 기타 제외)
+        crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)', '총범죄']]
         
         if crime_cols:
             d_counts = df_d[crime_cols].sum().sort_values(ascending=False).head(5)
-            d_counts.index = [trans_map.get(idx, idx) for idx in d_counts.index]
             
             fig = px.bar(x=d_counts.values, y=d_counts.index, orientation='h', 
                          title=f"{selected_district} 주요 범죄 유형", labels={'x':'건수', 'y':''},
@@ -492,7 +505,6 @@ with tab4:
         with c2:
             st.subheader("🥧 전체 범죄 유형")
             all_sums = df_stat[crime_cols].sum().sort_values(ascending=False).head(10)
-            all_sums.index = [trans_map.get(idx, idx) for idx in all_sums.index]
             fig_pie = px.pie(values=all_sums.values, names=all_sums.index, hole=0.3)
             st.plotly_chart(fig_pie, use_container_width=True)
     else:
