@@ -104,7 +104,6 @@ def load_crime_data_excel(file_name):
         new_cols = {}
         for col in df.columns:
             clean_col = str(col).replace('\n', '').strip()
-            # 매핑 딕셔너리 키와 부분 일치 확인
             mapped = False
             for k, v in trans_map.items():
                 if k in clean_col:
@@ -148,8 +147,8 @@ def load_crime_data_excel(file_name):
         return pd.DataFrame()
 
 @st.cache_data
-def get_osm_places(category, lat, lng, radius_m=1000, cuisine_filter=None):
-    # ★ 수정: 반경을 1000m로 줄임 (데이터 로딩 실패 방지)
+def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
+    # ★ 수정: 반경을 3000m로 다시 확대!
     overpass_url = "http://overpass-api.de/api/interpreter"
     
     if category == 'restaurant': tag = '["amenity"="restaurant"]'
@@ -159,7 +158,7 @@ def get_osm_places(category, lat, lng, radius_m=1000, cuisine_filter=None):
 
     query = f"""[out:json];(node{tag}(around:{radius_m},{lat},{lng}););out body;"""
     try:
-        response = requests.get(overpass_url, params={'data': query}, timeout=10) # 타임아웃 추가
+        response = requests.get(overpass_url, params={'data': query}, timeout=15) # 타임아웃 넉넉하게
         if response.status_code != 200: return []
         
         data = response.json()
@@ -186,7 +185,6 @@ def get_osm_places(category, lat, lng, radius_m=1000, cuisine_filter=None):
                                 if any(c in raw_cuisine for c in cuisine_map[user_select]):
                                     is_match = True; detected_type = user_select; break
                             elif user_select == "기타": 
-                                # 기타 선택시 매칭 안된 것들 포함
                                 is_match = True 
                         if not is_match: continue
                     else:
@@ -334,7 +332,6 @@ with tab1:
     center = st.session_state['map_center']
     m = folium.Map(location=center, zoom_start=14)
 
-    # 1. 범죄 데이터
     if show_crime:
         crime_df = load_crime_data_excel(CRIME_FILE_NAME)
         if not crime_df.empty:
@@ -348,10 +345,9 @@ with tab1:
         sm = st.session_state['search_marker']
         folium.Marker([sm['lat'], sm['lng']], popup=sm['name'], icon=folium.Icon(color='red', icon='info-sign')).add_to(m)
 
-    # 3. 장소 마커 (아이콘 적용 + 팝업 수정)
-    # [수정] 반경을 1000m로 줄여서 API 부하를 줄임
+    # 3. 장소 마커 (반경 3000m)
     if show_food:
-        places = get_osm_places('restaurant', center[0], center[1], 1000, selected_cuisines)
+        places = get_osm_places('restaurant', center[0], center[1], 3000, selected_cuisines)
         fg_food = folium.FeatureGroup(name="맛집")
         for p in places:
             html = f"""<div style='width:150px'><b>{p['name']}</b><br><span style='color:grey'>{p['desc']}</span><br><a href='{p['link']}' target='_blank'>구글 검색</a></div>"""
@@ -359,7 +355,7 @@ with tab1:
         fg_food.add_to(m)
 
     if show_hotel:
-        places = get_osm_places('hotel', center[0], center[1], 1000)
+        places = get_osm_places('hotel', center[0], center[1], 3000)
         fg_hotel = folium.FeatureGroup(name="호텔")
         for p in places:
             html = f"""<div style='width:150px'><b>{p['name']}</b><br><span style='color:grey'>{p['desc']}</span><br><a href='{p['link']}' target='_blank'>구글 검색</a></div>"""
@@ -367,7 +363,7 @@ with tab1:
         fg_hotel.add_to(m)
 
     if show_tour:
-        places = get_osm_places('tourism', center[0], center[1], 1000)
+        places = get_osm_places('tourism', center[0], center[1], 3000)
         fg_tour = folium.FeatureGroup(name="관광")
         for p in places:
             html = f"""<div style='width:150px'><b>{p['name']}</b><br><span style='color:grey'>{p['desc']}</span><br><a href='{p['link']}' target='_blank'>구글 검색</a></div>"""
@@ -476,6 +472,7 @@ with tab4:
     st.header("📊 베를린 범죄 데이터 분석 (한국어)")
     
     df_stat = load_crime_data_excel(CRIME_FILE_NAME)
+    trans_map = get_crime_translation_map()
     
     if not df_stat.empty:
         total_crime = df_stat['총범죄'].sum()
@@ -488,10 +485,9 @@ with tab4:
         st.subheader("🔍 구별 범죄 TOP 5")
         districts_list = sorted(df_stat['District'].unique())
         selected_district = st.selectbox("지역 선택", districts_list)
-        df_d = df_stat[df_stat['District'] == selected_district]
         
-        # 한국어 컬럼만 골라내기 (District 등 제외)
-        crime_cols = [c for c in df_stat.columns if c not in ['District', '총범죄', 'LOR-Schlüssel (Bezirksregion)', 'Total_Crime']]
+        df_d = df_stat[df_stat['District'] == selected_district]
+        crime_cols = [c for c in df_stat.columns if c not in ['District', '총범죄', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)', '총범죄']]
         
         if crime_cols:
             d_counts = df_d[crime_cols].sum().sort_values(ascending=False).head(5)
