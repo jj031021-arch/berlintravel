@@ -8,7 +8,7 @@ import googlemaps
 import plotly.express as px
 
 # ---------------------------------------------------------
-# 🚨 파일 이름 설정 (엑셀 파일명)
+# 🚨 파일 이름 설정 (업로드할 엑셀 파일명)
 # ---------------------------------------------------------
 CRIME_FILE_NAME = "2023_berlin_crime.xlsx"
 
@@ -27,7 +27,7 @@ if GEMINI_API_KEY:
         pass
 
 # ---------------------------------------------------------
-# 2. 데이터 처리 함수
+# 2. 데이터 처리 함수 (엑셀 전용)
 # ---------------------------------------------------------
 @st.cache_data
 def get_exchange_rate():
@@ -49,18 +49,27 @@ def get_weather():
 
 @st.cache_data
 def load_crime_data_excel(file_name):
+    """
+    엑셀(.xlsx) 파일을 읽어서 지도용 데이터로 변환합니다.
+    """
     try:
+        # 1. 엑셀 읽기 (앞 4줄 건너뛰기 - skiprows=4)
         df = pd.read_excel(file_name, skiprows=4, engine='openpyxl')
+
+        # 2. 컬럼명 정리 (\n 제거)
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
-        
+
+        # 3. 필요한 컬럼 찾기 (구 이름, 총 범죄 수)
         district_col = None
         total_col = None
+        
         for c in df.columns:
             if 'Bezeichnung' in c: district_col = c
             if 'Straftaten' in c and 'insgesamt' in c: total_col = c
         
         if not district_col: return pd.DataFrame()
 
+        # 4. 베를린 12개 구 이름만 필터링
         berlin_districts = [
             "Mitte", "Friedrichshain-Kreuzberg", "Pankow", "Charlottenburg-Wilmersdorf", 
             "Spandau", "Steglitz-Zehlendorf", "Tempelhof-Schöneberg", "Neukölln", 
@@ -68,26 +77,29 @@ def load_crime_data_excel(file_name):
         ]
         df = df[df[district_col].isin(berlin_districts)].copy()
 
-        # 숫자 정제 및 총계 컬럼 처리
+        # 5. 숫자 데이터 정제 (문자 -> 숫자)
         if total_col:
             df[total_col] = df[total_col].astype(str).str.replace('.', '', regex=False)
             df['Total_Crime'] = pd.to_numeric(df[total_col], errors='coerce').fillna(0)
         
+        # 통계용 컬럼도 정제
         cols_to_clean = [c for c in df.columns if c not in [district_col, 'LOR-Schlüssel (Bezirksregion)', 'Total_Crime']]
         for c in cols_to_clean:
             df[c] = df[c].astype(str).str.replace('.', '', regex=False)
             df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
 
+        # 6. 컬럼명 표준화
         df = df.rename(columns={district_col: 'District'})
+        
         return df
-    except:
+
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data
 def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
     overpass_url = "http://overpass-api.de/api/interpreter"
     
-    tag = ""
     if category == 'restaurant': tag = '["amenity"="restaurant"]'
     elif category == 'hotel': tag = '["tourism"="hotel"]'
     elif category == 'tourism': tag = '["tourism"~"attraction|museum|artwork|viewpoint"]'
@@ -105,7 +117,7 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
         data = response.json()
         results = []
         
-        # 음식점 유형 매핑
+        # 음식점 유형 분류
         cuisine_map = {
             "한식": ["korean"],
             "양식": ["italian", "french", "german", "american", "burger", "pizza", "steak", "western"],
@@ -120,7 +132,6 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
                 name = element['tags']['name']
                 raw_cuisine = element['tags'].get('cuisine', 'general').lower()
                 
-                # 카테고리 필터링 로직
                 detected_type = "기타"
                 if category == 'restaurant':
                     is_match = False
@@ -131,11 +142,10 @@ def get_osm_places(category, lat, lng, radius_m=3000, cuisine_filter=None):
                                     is_match = True
                                     detected_type = user_select
                                     break
-                            elif user_select == "기타": # 매핑 안된 것들
+                            elif user_select == "기타":
                                 is_match = True 
                         if not is_match: continue
                     else:
-                        # 전체 선택 시 자동 분류 표시용
                         for k, v in cuisine_map.items():
                             if any(c in raw_cuisine for c in v):
                                 detected_type = k
@@ -168,7 +178,7 @@ def search_location(query):
     return None, None, None
 
 def get_gemini_response(prompt):
-    if not GEMINI_API_KEY: return "API 키가 필요합니다."
+    if not GEMINI_API_KEY: return "API 키 확인 필요"
     try:
         model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
@@ -182,7 +192,7 @@ courses = {
     "🌳 Theme 1: 숲과 힐링": [
         {"name": "1. 전승기념탑", "lat": 52.5145, "lng": 13.3501, "desc": "베를린 전경이 한눈에 보이는 황금 천사상"},
         {"name": "2. 티어가르텐 산책", "lat": 52.5135, "lng": 13.3575, "desc": "도심 속 거대한 허파"},
-        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든 (피자/맥주)"},
+        {"name": "3. Cafe am Neuen See (점심)", "lat": 52.5076, "lng": 13.3448, "desc": "호수 앞 비어가든"},
         {"name": "4. 베를린 동물원", "lat": 52.5079, "lng": 13.3377, "desc": "세계 최대 종을 보유한 동물원"},
         {"name": "5. 카이저 빌헬름 교회", "lat": 52.5048, "lng": 13.3350, "desc": "전쟁의 상처를 간직한 교회"}
     ],
@@ -262,9 +272,9 @@ if search_query:
 
 st.sidebar.divider()
 
-# ★ 지도 필터 (공통 적용)
+# ★ 지도 필터 (공통)
 st.sidebar.subheader("👀 지도 표시 설정")
-show_crime = st.sidebar.checkbox("🚨 범죄 위험도 (Choropleth)", value=True)
+show_crime = st.sidebar.checkbox("🚨 범죄 위험도 (지역별)", value=True)
 st.sidebar.write("---")
 show_food = st.sidebar.checkbox("🍽️ 주변 맛집", value=True)
 show_hotel = st.sidebar.checkbox("🏨 숙박시설", value=False)
@@ -286,7 +296,7 @@ with tab1:
     center = st.session_state['map_center']
     m = folium.Map(location=center, zoom_start=14)
 
-    # 1. 범죄 데이터 레이어
+    # 1. 범죄 데이터 레이어 (엑셀)
     if show_crime:
         crime_df = load_crime_data_excel(CRIME_FILE_NAME)
         if not crime_df.empty:
@@ -345,7 +355,6 @@ with tab1:
 with tab2:
     st.subheader("🚩 테마별 추천 여행 코스")
     
-    # 코스 선택 (가로형 Radio)
     themes = list(courses.keys())
     selected_theme = st.radio("테마를 선택하세요:", themes, horizontal=True)
     course_data = courses[selected_theme]
@@ -353,10 +362,10 @@ with tab2:
     c_col1, c_col2 = st.columns([1.5, 1])
     
     with c_col1:
-        # 코스 지도 (크게) - 여기도 범죄 필터 적용
+        # 코스 지도 (크게)
         m2 = folium.Map(location=[course_data[2]['lat'], course_data[2]['lng']], zoom_start=13)
         
-        # 범죄 레이어 추가 (선택 시)
+        # 여기도 범죄 레이어 추가 (필터 연동)
         if show_crime:
             crime_df = load_crime_data_excel(CRIME_FILE_NAME)
             if not crime_df.empty:
@@ -379,11 +388,11 @@ with tab2:
             ).add_to(m2)
         
         folium.PolyLine(points, color="red", weight=4, opacity=0.7).add_to(m2)
-        st_folium(m2, height=700) # 지도 높이 증가
+        st_folium(m2, height=700)
         
     with c_col2:
-        st.markdown(f"### {selected_theme} 상세 정보")
-        # Expander 대신 바로 보여주기
+        st.markdown(f"### {selected_theme} 상세")
+        # 리스트 펼쳐서 보여주기
         for idx, spot in enumerate(course_data):
             st.markdown(f"**{idx+1}. {spot['name']}**")
             st.caption(spot['desc'])
@@ -392,15 +401,14 @@ with tab2:
             st.write("---")
 
 # =========================================================
-# TAB 3: 커뮤니티 & AI (장소 후기 추가)
+# TAB 3: 커뮤니티 & AI
 # =========================================================
 with tab3:
     col_review, col_rec = st.columns(2)
     
-    # 1. 장소별 후기 남기기
+    # 1. 장소별 후기
     with col_review:
         st.subheader("💬 장소별 후기")
-        # 코스에 있는 장소들 목록 추출
         all_places = sorted(list(set([p['name'] for v in courses.values() for p in v])))
         target_place = st.selectbox("어떤 장소에 다녀오셨나요?", ["선택하세요"] + all_places)
         
@@ -436,7 +444,7 @@ with tab3:
                 st.success(rec['desc'])
                 for reply in rec['replies']:
                     st.caption(f"↳ {reply}")
-                with st.expander("댓글 달기"):
+                with st.expander("💬 댓글 달기"):
                     reply_text = st.text_input("내용", key=f"re_{i}")
                     if st.button("등록", key=f"btn_{i}"):
                         rec['replies'].append(reply_text)
@@ -475,12 +483,10 @@ with tab4:
         
         st.divider()
         
-        # Interactive Plots
         c1, c2 = st.columns(2)
         
         with c1:
-            st.subheader("🏙️ 구별 범죄 Treemap")
-            # Treemap이 더 Interactive함
+            st.subheader("🏙️ 구별 범죄 분포 (Treemap)")
             fig_tree = px.treemap(
                 df_stat, path=['District'], values='Total_Crime',
                 color='Total_Crime', color_continuous_scale='Reds',
@@ -490,6 +496,7 @@ with tab4:
             
         with c2:
             st.subheader("🥧 범죄 유형 분석")
+            # 숫자형 컬럼만 추출
             crime_cols = [c for c in df_stat.columns if c not in ['District', 'Total_Crime', 'LOR-Schlüssel (Bezirksregion)']]
             if crime_cols:
                 type_sums = df_stat[crime_cols].sum().sort_values(ascending=False).head(10)
@@ -501,7 +508,6 @@ with tab4:
                 st.plotly_chart(fig_pie, use_container_width=True)
         
         st.subheader("📈 지역별 범죄 분포 (Box Plot)")
-        # Box Plot for distribution
         fig_box = px.box(df_stat, y='Total_Crime', points="all", title="구별 범죄 발생 수 분포")
         st.plotly_chart(fig_box, use_container_width=True)
 
